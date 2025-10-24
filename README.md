@@ -201,7 +201,7 @@ cd BlogAgent
 }
 ```
 
-> 💡 **提示**: 也支持 Azure OpenAI 和其他兼容 OpenAI API 的服务
+> 💡 **提示**: 也支持其他兼容 OpenAI API 的服务
 
 #### 3. 还原依赖
 
@@ -430,78 +430,6 @@ protected override ChatResponseFormat? ResponseFormat =>
     );
 ```
 
----
-
-## 🔧 配置说明
-
-### appsettings.json
-
-```json
-{
-  "Logging": {
-    "LogLevel": {
-      "Default": "Information",
-      "Microsoft.AspNetCore": "Warning"
-    }
-  },
-  "AllowedHosts": "*",
-  "urls": "http://*:5000",
-  
-  "ProSettings": {
-    "NavTheme": "light",
-    "Layout": "side",
-    "Title": "BlogAgent",
-    "FixedHeader": false,
-    "FixSiderbar": true
-  },
-  
-  "OpenAI": {
-    "Key": "your-api-key",
-    "EndPoint": "https://api.openai.com/v1",
-    "ChatModel": "gpt-4o",
-    "EmbeddingModel": "text-embedding-3-small"
-  },
-  
-  "DBConnection": {
-    "DbType": "Sqlite",
-    "ConnectionStrings": "Data Source=BlogAgent.db",
-    "VectorConnection": "BlogAgentMem.db",
-    "VectorSize": 1536
-  }
-}
-```
-
-### 数据库配置
-
-项目使用 **SqlSugar ORM** + **SQLite**:
-
-- 主数据库: `BlogAgent.db` (任务、内容、审查结果)
-- 向量数据库: `BlogAgentMem.db` (预留,用于RAG功能)
-
-首次运行时会自动创建数据库和表结构 (Code First)。
-
----
-
-## 📖 文档
-
-### 主要文档
-
-| 文档 | 说明 |
-|------|------|
-| [Agent Framework 功能分析](docs/BlogAgent项目Agent-Framework功能分析.md) | Agent Framework 已使用和可添加的功能 |
-| [Workflow 改造说明](docs/Agent-Framework-Workflow改造说明.md) | 如何升级到 Workflow |
-| [Workflow 测试指南](docs/Agent-Framework-Workflow测试指南.md) | 工作流测试步骤 |
-| [快速参考卡](docs/快速参考卡.md) | 核心 API 速查 |
-| [MCP 工具配置](docs/MCP工具配置功能说明.md) | MCP 协议集成说明 |
-| [改造完成总结](docs/改造完成总结.md) | 改造成果总结 |
-
-### 在线文档
-
-- [Microsoft Agent Framework 官方文档](https://github.com/microsoft/agent-framework)
-- [Microsoft.Extensions.AI 文档](https://devblogs.microsoft.com/dotnet/introducing-microsoft-extensions-ai-preview/)
-- [Ant Design Blazor 文档](https://antblazor.com/)
-
----
 
 ## 🤝 贡献指南
 
