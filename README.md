@@ -504,7 +504,7 @@ private bool useAgentFrameworkWorkflow = false;
 
 A: 支持所有兼容 OpenAI API 的服务:
 - OpenAI (gpt-4, gpt-4o, gpt-3.5-turbo)
-- Azure OpenAI
+- Azure OpenAI 、Claude等使用new-api等模型网关转发
 - 自部署的兼容服务 (如 LocalAI, Ollama)
 
 ### Q: 数据库可以换成 MySQL/PostgreSQL 吗?
