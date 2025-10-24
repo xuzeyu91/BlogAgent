@@ -1,0 +1,301 @@
+@page "/blog/create"
+@using BlogAgent.Domain.Domain.Dto
+@using BlogAgent.Domain.Services
+@inject BlogService BlogService
+@inject NavigationManager Navigation
+@inject IMessageService Message
+@implements IDisposable
+
+<PageHeader Title="创建博客任务">
+    <PageHeaderContent>
+        <Paragraph>通过AI智能体协作创建高质量技术博客</Paragraph>
+    </PageHeaderContent>
+</PageHeader>
+
+<Card>
+    <Form Model="@model" LabelColSpan="4" WrapperColSpan="20">
+        <FormItem Label="博客主题" Required>
+            <Input @bind-Value="@model.Topic" Placeholder="例如:深度解析.NET 9的新特性" MaxLength="200" />
+        </FormItem>
+
+        <FormItem Label="工作流模式">
+            <RadioGroup @bind-Value="@model.WorkflowMode">
+                <Radio RadioButton Value="@("auto")">
+                    <Icon Type="rocket" /> 全自动模式
+                    <div style="font-size: 12px; color: #8c8c8c; margin-top: 4px;">
+                        AI 自动完成资料收集→博客撰写→质量审查,无需人工干预
+                    </div>
+                </Radio>
+                <Radio RadioButton Value="@("manual")">
+                    <Icon Type="control" /> 分步模式
+                    <div style="font-size: 12px; color: #8c8c8c; margin-top: 4px;">
+                        每个阶段手动触发,可以随时查看和调整中间结果
+                    </div>
+                </Radio>
+            </RadioGroup>
+        </FormItem>
+
+        <FormItem Label="输入方式">
+            <RadioGroup @bind-Value="InputMode">
+                <Radio RadioButton Value="@("text")">直接输入文本</Radio>
+                <Radio RadioButton Value="@("file")">上传文档</Radio>
+                <Radio RadioButton Value="@("url")">提供参考链接</Radio>
+            </RadioGroup>
+        </FormItem>
+
+        @if (inputMode == "text")
+        {
+            <FormItem Label="参考资料" Required>
+                <TextArea @bind-Value="@model.ReferenceContent"
+                          Rows="12"
+                          Placeholder="@("粘贴参考资料内容...\n\n可以包含:\n- 技术文档\n- 代码示例\n- 最佳实践\n- 相关概念说明")"
+                          MaxLength="10000" 
+                          ShowCount />
+            </FormItem>
+        }
+        else if (inputMode == "file")
+        {
+            <FormItem Label="上传文档">
+                <InputFile OnChange="HandleFileSelected"
+                           accept=".txt,.md,.doc,.docx,.pdf"
+                           style="display:block; margin-bottom:8px;" />
+                <span style="display:block; color:#6c757d;">支持 txt、md、doc、docx、pdf，最大 10MB</span>
+                @if (!string.IsNullOrEmpty(uploadedFileName))
+                {
+                    <Alert Type="@AlertType.Success" Message="@($"已上传: {uploadedFileName}")" ShowIcon="true" Style="margin-top:10px" />
+                }
+            </FormItem>
+        }
+        else
+        {
+            <FormItem Label="参考链接" Required>
+                <TextArea @bind-Value="@model.ReferenceUrls"
+                          Rows="6"
+                          Placeholder="@("输入参考链接,每行一个\n例如:\nhttps://learn.microsoft.com/zh-cn/dotnet/\nhttps://github.com/dotnet/aspnetcore")"
+                          MaxLength="2000" />
+            </FormItem>
+        }
+
+        <Divider Orientation="@DividerOrientation.Left">写作要求(可选)</Divider>
+
+        <FormItem Label="目标字数">
+            <AntDesign.InputNumber TValue="int?"
+                                   @bind-Value="@model.TargetWordCount"
+                                   Min="500"
+                                   Max="10000"
+                                   Step="500"
+                                   Placeholder="建议1500-3000字"
+                                   Style="width: 200px;" />
+        </FormItem>
+
+        <FormItem Label="写作风格">
+            <AutoComplete @bind-Value="model.Style"
+                          Placeholder="选择或输入写作风格"
+                          Options="@styleOptions"
+                          AllowClear />
+            <div style="color: #8c8c8c; font-size: 12px; margin-top: 4px;">
+                可选择预设风格或自定义输入
+            </div>
+        </FormItem>
+
+        <FormItem Label="目标读者">
+            <AutoComplete @bind-Value="model.TargetAudience"
+                          Placeholder="选择或输入目标读者群体"
+                          Options="@audienceOptions"
+                          AllowClear />
+            <div style="color: #8c8c8c; font-size: 12px; margin-top: 4px;">
+                可选择预设群体或自定义输入
+            </div>
+        </FormItem>
+
+        <FormItem WrapperColOffset="4">
+            <Space>
+                <SpaceItem>
+                    <Button Type="@ButtonType.Primary"
+                            HtmlType="submit"
+                            Loading="@loading"
+                            Disabled="@(!IsFormValid())"
+                            OnClick="OnSubmitAsync">
+                        <Icon Type="rocket" Theme="@IconThemeType.Outline" /> 创建任务并开始
+                    </Button>
+                </SpaceItem>
+                <SpaceItem>
+                    <Button OnClick="@(() => Navigation.NavigateTo("/blog/list"))">
+                        取消
+                    </Button>
+                </SpaceItem>
+            </Space>
+        </FormItem>
+    </Form>
+</Card>
+
+@code {
+    private CreateBlogRequest model = new() { WorkflowMode = "auto" };
+    private string inputMode = "text";
+    private bool loading = false;
+    private string? uploadedFileName;
+    private bool _disposed = false;
+
+    // 写作风格选项
+    private string[] styleOptions = new[]
+    {
+        "通俗易懂 - 面向初学者",
+        "专业严谨 - 面向专家",
+        "实战导向 - 强调动手实践",
+        "深度分析 - 原理剖析"
+    };
+
+    // 目标读者选项
+    private string[] audienceOptions = new[]
+    {
+        "初级开发者 - 0-2年经验",
+        "中级开发者 - 2-5年经验",
+        "高级开发者 - 5年以上经验",
+        "架构师 - 技术决策者"
+    };
+
+    private string InputMode
+    {
+        get => inputMode;
+        set
+        {
+            if (inputMode == value)
+            {
+                return;
+            }
+
+            inputMode = value;
+            model.ReferenceContent = null;
+            model.ReferenceUrls = null;
+            uploadedFileName = null;
+        }
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs args)
+    {
+        var file = args.File;
+        if (file == null)
+        {
+            return;
+        }
+
+        if (file.Size > 10485760)
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Warning("文件大小超过 10MB 限制"));
+            }
+            return;
+        }
+
+        uploadedFileName = file.Name;
+
+        try
+        {
+            await using var stream = file.OpenReadStream(maxAllowedSize: 10485760);
+            using var reader = new StreamReader(stream);
+            model.ReferenceContent = await reader.ReadToEndAsync();
+            
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Success($"文件 {uploadedFileName} 读取成功"));
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Error($"文件读取失败: {ex.Message}"));
+            }
+            uploadedFileName = null;
+        }
+    }
+
+    private bool IsFormValid()
+    {
+        if (string.IsNullOrWhiteSpace(model.Topic))
+            return false;
+
+        return inputMode switch
+        {
+            "text" => !string.IsNullOrWhiteSpace(model.ReferenceContent),
+            "file" => !string.IsNullOrWhiteSpace(model.ReferenceContent),
+            "url" => !string.IsNullOrWhiteSpace(model.ReferenceUrls),
+            _ => false
+        };
+    }
+
+    private async Task OnSubmitAsync()
+    {
+        if (!IsFormValid())
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Warning("请完整填写必填项"));
+            }
+            return;
+        }
+
+        loading = true;
+        await SafeStateHasChangedAsync();
+        
+        try
+        {
+            var taskId = await BlogService.CreateTaskAsync(model);
+            
+            if (_disposed) return;
+            
+            // 根据工作流模式跳转到不同页面
+            var targetPage = model.WorkflowMode == "auto" 
+                ? $"/blog/auto-workflow/{taskId}" 
+                : $"/blog/workflow/{taskId}";
+            
+            var modeText = model.WorkflowMode == "auto" ? "全自动工作流" : "分步工作流";
+            await InvokeAsync(() => Message.Success($"任务创建成功,正在跳转到{modeText}页面..."));
+            
+            // 延迟一下再跳转,让用户看到成功提示
+            await Task.Delay(500);
+            
+            if (!_disposed)
+            {
+                Navigation.NavigateTo(targetPage);
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Error($"创建任务失败: {ex.Message}"));
+            }
+        }
+        finally
+        {
+            if (!_disposed)
+            {
+                loading = false;
+                await SafeStateHasChangedAsync();
+            }
+        }
+    }
+
+    private async Task SafeStateHasChangedAsync()
+    {
+        if (!_disposed)
+        {
+            try
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (ObjectDisposedException)
+            {
+                // 组件已被销毁,忽略此异常
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+    }
+}
+

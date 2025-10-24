@@ -1,0 +1,26 @@
+﻿[
+  {
+    "path": "/",
+    "name": "首页",
+    "key": "home",
+    "icon": "home"
+  },
+  {
+    "path": "/blog/list",
+    "name": "博客列表",
+    "key": "blog-list",
+    "icon": "unordered-list"
+  },
+  {
+    "path": "/blog/create",
+    "name": "创建博客",
+    "key": "blog-create",
+    "icon": "plus-circle"
+  },
+  {
+    "path": "/mcp/config",
+    "name": "MCP配置",
+    "key": "mcp-config",
+    "icon": "setting"
+  }
+]

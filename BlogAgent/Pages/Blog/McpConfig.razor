@@ -1,0 +1,841 @@
+@page "/mcp/config"
+@using BlogAgent.Domain.Domain.Dto
+@using BlogAgent.Domain.Services
+@inject McpConfigService McpConfigService
+@inject IMessageService Message
+@implements IDisposable
+
+<PageHeader Title="MCP 工具配置">
+    <PageHeaderContent>
+        <Paragraph>配置 Model Context Protocol (MCP) 服务器,让 Agent 可以调用外部工具</Paragraph>
+    </PageHeaderContent>
+    <PageHeaderExtra>
+        <Space>
+            <SpaceItem>
+                <Button Type="@ButtonType.Primary" OnClick="ShowAddDialog">
+                    <Icon Type="plus" /> 新增 MCP 服务器
+                </Button>
+            </SpaceItem>
+            <SpaceItem>
+                <Button OnClick="ShowImportDialog">
+                    <Icon Type="import" /> 导入 JSON
+                </Button>
+            </SpaceItem>
+            <SpaceItem>
+                <Button OnClick="RefreshList">
+                    <Icon Type="reload" /> 刷新
+                </Button>
+            </SpaceItem>
+        </Space>
+    </PageHeaderExtra>
+</PageHeader>
+
+<Card>
+    @if (loading)
+    {
+        <div style="text-align: center; padding: 50px;">
+            <Spin Size="SpinSize.Large" />
+        </div>
+    }
+    else if (configs == null || configs.Count == 0)
+    {
+        <Empty Description="@("暂无 MCP 服务器配置")">
+            <ChildContent>
+                <Button Type="@ButtonType.Primary" OnClick="ShowAddDialog">
+                    立即创建
+                </Button>
+            </ChildContent>
+        </Empty>
+    }
+    else
+    {
+        <Table TItem="McpServerConfigDto" DataSource="@configs" Loading="@loading">
+            <PropertyColumn Property="c => c.Name" Title="名称" TItem="McpServerConfigDto" TProp="string">
+                <Text Strong>@context.Name</Text>
+                @if (!string.IsNullOrEmpty(context.Description))
+                {
+                    <br />
+                    <span style="color: #8c8c8c; font-size: 12px;">@context.Description</span>
+                }
+            </PropertyColumn>
+            
+            <PropertyColumn Property="c => c.TransportType" Title="类型" TItem="McpServerConfigDto" TProp="string">
+                <Tag Color="@(context.TransportType == "stdio" ? "blue" : "green")">
+                    @context.TransportType.ToUpper()
+                </Tag>
+            </PropertyColumn>
+            
+            <PropertyColumn Title="配置信息" TItem="McpServerConfigDto" TProp="string">
+                @if (context.TransportType == "stdio")
+                {
+                    <div>
+                        <code>@context.Command</code>
+                        @if (context.Arguments != null && context.Arguments.Count > 0)
+                        {
+                            <br />
+                            <span style="color: #8c8c8c; font-size: 12px;">
+                                参数: @string.Join(" ", context.Arguments)
+                            </span>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <code>@context.ServerUrl</code>
+                }
+            </PropertyColumn>
+            
+            <PropertyColumn Property="c => c.IsEnabled" Title="状态" TItem="McpServerConfigDto" TProp="bool">
+                <Switch @bind-Value="@context.IsEnabled" 
+                        OnChange="@(async (value) => await ToggleEnabled(context.Id, value))" />
+                <span style="margin-left: 8px;">
+                    @(context.IsEnabled ? "已启用" : "已禁用")
+                </span>
+            </PropertyColumn>
+            
+            <PropertyColumn Property="c => c.UpdatedAt" Title="更新时间" Format="yyyy-MM-dd HH:mm" TItem="McpServerConfigDto" TProp="DateTime" />
+            
+            <ActionColumn Title="操作">
+                <Space Size="@SpaceSize.Small">
+                    <SpaceItem>
+                        <Button Size="@ButtonSize.Small" OnClick="@(() => TestServer(context.Id))">
+                            <Icon Type="experiment" /> 测试
+                        </Button>
+                    </SpaceItem>
+                    <SpaceItem>
+                        <Button Size="@ButtonSize.Small" OnClick="@(() => ShowEditDialog(context))">
+                            <Icon Type="edit" /> 编辑
+                        </Button>
+                    </SpaceItem>
+                    <SpaceItem>
+                        <Popconfirm Title="确定要删除这个配置吗?" 
+                                    OnConfirm="@(() => DeleteConfig(context.Id))">
+                            <Button Size="@ButtonSize.Small" Danger>
+                                <Icon Type="delete" /> 删除
+                            </Button>
+                        </Popconfirm>
+                    </SpaceItem>
+                </Space>
+            </ActionColumn>
+        </Table>
+    }
+</Card>
+
+@* 配置对话框 *@
+<Modal Title="@(editingConfig?.Id > 0 ? "编辑 MCP 服务器" : "新增 MCP 服务器")"
+       @bind-Visible="@dialogVisible"
+       Width="800"
+       OnOk="SaveConfig"
+       OnCancel="CloseDialog"
+       ConfirmLoading="@saving">
+    
+    @if (editingConfig != null)
+    {
+        <Form Model="@editingConfig" LabelColSpan="6" WrapperColSpan="18">
+            <FormItem Label="名称" Required>
+                <Input @bind-Value="@editingConfig.Name" Placeholder="例如: GitHub MCP Server" MaxLength="100" />
+            </FormItem>
+
+            <FormItem Label="描述">
+                <TextArea @bind-Value="@editingConfig.Description" 
+                          Placeholder="简要说明该 MCP 服务器的用途"
+                          Rows="2"
+                          MaxLength="500" />
+            </FormItem>
+
+            <FormItem Label="传输类型" Required>
+                <RadioGroup @bind-Value="@editingConfig.TransportType">
+                    <Radio RadioButton Value="@("stdio")">Stdio (本地进程)</Radio>
+                    <Radio RadioButton Value="@("http")">HTTP (远程服务)</Radio>
+                </RadioGroup>
+            </FormItem>
+
+            @if (editingConfig.TransportType == "stdio")
+            {
+                <FormItem Label="命令" Required>
+                    <Input @bind-Value="@editingConfig.Command" 
+                           Placeholder="例如: npx, node, python"
+                           MaxLength="200" />
+                    <div style="color: #8c8c8c; font-size: 12px; margin-top: 4px;">
+                        用于启动 MCP 服务器的命令
+                    </div>
+                </FormItem>
+
+                <FormItem Label="参数">
+                    <TextArea @bind-Value="@argumentsText"
+                              Placeholder="@("每行一个参数,例如:\n-y\n@modelcontextprotocol/server-github")"
+                              Rows="4" />
+                    <div style="color: #8c8c8c; font-size: 12px; margin-top: 4px;">
+                        命令行参数,每行一个
+                    </div>
+                </FormItem>
+
+                <FormItem Label="环境变量">
+                    <TextArea @bind-Value="@envVarsText"
+                              Placeholder="@("每行一个,格式: KEY=VALUE\n例如:\nGITHUB_TOKEN=your_token")"
+                              Rows="4" />
+                    <div style="color: #8c8c8c; font-size: 12px; margin-top: 4px;">
+                        环境变量设置,格式: KEY=VALUE,每行一个
+                    </div>
+                </FormItem>
+            }
+            else
+            {
+                <FormItem Label="服务器 URL" Required>
+                    <Input @bind-Value="@editingConfig.ServerUrl" 
+                           Placeholder="例如: http://localhost:7071/"
+                           MaxLength="500" />
+                </FormItem>
+
+                <FormItem Label="需要认证">
+                    <Switch @bind-Value="@editingConfig.RequiresAuth" />
+                </FormItem>
+
+                @if (editingConfig.RequiresAuth)
+                {
+                    <FormItem Label="OAuth 客户端 ID">
+                        <Input @bind-Value="@editingConfig.OAuthClientId" 
+                               Placeholder="OAuth 客户端 ID"
+                               MaxLength="200" />
+                    </FormItem>
+
+                    <FormItem Label="OAuth 重定向 URI">
+                        <Input @bind-Value="@editingConfig.OAuthRedirectUri" 
+                               Placeholder="例如: http://localhost:1179/callback"
+                               MaxLength="500" />
+                    </FormItem>
+                }
+            }
+
+            <FormItem Label="启用">
+                <Switch @bind-Value="@editingConfig.IsEnabled" />
+            </FormItem>
+
+            <FormItem Label="备注">
+                <TextArea @bind-Value="@editingConfig.Remarks" 
+                          Placeholder="其他说明信息"
+                          Rows="3"
+                          MaxLength="1000" />
+            </FormItem>
+        </Form>
+    }
+</Modal>
+
+@* JSON 导入对话框 *@
+<Modal Title="导入 MCP 配置 JSON"
+       @bind-Visible="@importDialogVisible"
+       Width="800"
+       OnCancel="CloseImportDialog"
+       Footer="null">
+    
+    <Alert Type="@AlertType.Info" 
+           Message="支持的 JSON 格式"
+           ShowIcon="true"
+           Style="margin-bottom: 16px;">
+        <Description>
+            <div style="font-family: monospace; font-size: 12px;">
+                <div><strong>STDIO 格式 (本地进程):</strong></div>
+                <pre style="background: #ffffff; padding: 8px; border-radius: 4px; margin: 8px 0;">
+{
+  "mcpServers": {
+    "playwright-extension": {
+      "command": "npx",
+      "args": ["@@playwright/mcp@@latest", "--extension"],
+      "env": {
+        "API_KEY": "your-key"
+      }
+    }
+  }
+}</pre>
+                <div><strong>SSE 格式 (远程服务器):</strong></div>
+                <pre style="background: #ffffff; padding: 8px; border-radius: 4px; margin: 8px 0;">
+{
+  "mcpServers": {
+    "mcp-ip-query": {
+      "url": "https://mcp.higress.ai/mcp-ip-query/xxx/sse"
+    }
+  }
+}</pre>
+            </div>
+        </Description>
+    </Alert>
+    
+    <div style="margin-bottom: 16px;">
+        <div style="margin-bottom: 8px; font-weight: 500;">JSON 内容</div>
+        <TextArea @bind-Value="@importJsonText"
+                  Placeholder="@("粘贴 MCP 配置 JSON...")"
+                  Rows="15"
+                  Style="font-family: monospace;" />
+    </div>
+    
+    @if (!string.IsNullOrEmpty(importErrorMessage))
+    {
+        <Alert Type="@AlertType.Error" 
+               Message="@importErrorMessage" 
+               ShowIcon="true" 
+               Closable 
+               OnClose="@(() => importErrorMessage = string.Empty)" />
+    }
+    
+    @if (importPreviewConfigs != null && importPreviewConfigs.Count > 0)
+    {
+        <Alert Type="@AlertType.Success" 
+               Message="@($"解析成功,找到 {importPreviewConfigs.Count} 个配置")" 
+               ShowIcon="true"
+               Style="margin: 16px 0;" />
+        
+        <div style="max-height: 300px; overflow-y: auto; border: 1px solid #d9d9d9; border-radius: 2px;">
+            @foreach (var config in importPreviewConfigs)
+            {
+                <div style="padding: 12px; border-bottom: 1px solid #f0f0f0;">
+                    <div style="font-weight: 600; margin-bottom: 4px;">
+                        <Tag Color="@(config.TransportType == "stdio" ? "blue" : "green")">
+                            @config.TransportType.ToUpper()
+                        </Tag>
+                        @config.Name
+                    </div>
+                    @if (config.TransportType == "stdio")
+                    {
+                        <div style="color: #8c8c8c; font-size: 12px;">
+                            命令: <code>@config.Command</code>
+                            @if (config.Arguments != null && config.Arguments.Count > 0)
+                            {
+                                <span> @string.Join(" ", config.Arguments)</span>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div style="color: #8c8c8c; font-size: 12px;">
+                            URL: <code>@config.ServerUrl</code>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+    
+    <div style="text-align: right; margin-top: 16px; padding-top: 16px; border-top: 1px solid #f0f0f0;">
+        <Space>
+            <SpaceItem>
+                <Button OnClick="CloseImportDialog">取消</Button>
+            </SpaceItem>
+            <SpaceItem>
+                <Button Type="@ButtonType.Primary" 
+                        Loading="@importing" 
+                        OnClick="ImportFromJson">
+                    @(importPreviewConfigs != null && importPreviewConfigs.Count > 0 ? "确认导入" : "解析并预览")
+                </Button>
+            </SpaceItem>
+        </Space>
+    </div>
+</Modal>
+
+@* 测试结果对话框 *@
+<Modal Title="MCP 服务器测试结果"
+       @bind-Visible="@testResultVisible"
+       Width="800"
+       Footer="@null">
+    
+    @if (testResult != null)
+    {
+        <Result Status="@(testResult.Success ? ResultStatus.Success : ResultStatus.Error)"
+                Title="@testResult.Message">
+            <ChildContent>
+                @if (testResult.Success && testResult.Tools.Count > 0)
+                {
+                    <Divider Orientation="@DividerOrientation.Left">可用工具列表</Divider>
+                    @if (testResult.Tools != null && testResult.Tools.Count > 0)
+                    {
+                        <div style="max-height: 400px; overflow-y: auto; border: 1px solid #d9d9d9; border-radius: 2px;">
+                            @foreach (var tool in testResult.Tools)
+                            {
+                                <div style="padding: 12px; border-bottom: 1px solid #f0f0f0;">
+                                    <div style="font-weight: 600; margin-bottom: 4px;">@tool.Name</div>
+                                    <div style="color: #8c8c8c; font-size: 14px;">@tool.Description</div>
+                                </div>
+                            }
+                        </div>
+                    }
+                }
+                else if (!testResult.Success && !string.IsNullOrEmpty(testResult.Error))
+                {
+                    <Alert Type="@AlertType.Error" 
+                           Message="错误详情" 
+                           Description="@testResult.Error" 
+                           ShowIcon="true" />
+                }
+            </ChildContent>
+            <Extra>
+                <Button Type="@ButtonType.Primary" OnClick="@(() => testResultVisible = false)">
+                    关闭
+                </Button>
+            </Extra>
+        </Result>
+    }
+</Modal>
+
+@code {
+    private List<McpServerConfigDto> configs = new();
+    private bool loading = false;
+    private bool dialogVisible = false;
+    private bool testResultVisible = false;
+    private bool importDialogVisible = false;
+    private bool saving = false;
+    private bool importing = false;
+    private bool _disposed = false;
+
+    private SaveMcpServerConfigRequest? editingConfig;
+    private McpServerTestResult? testResult;
+    
+    private string argumentsText = string.Empty;
+    private string envVarsText = string.Empty;
+    private string importJsonText = string.Empty;
+    private string importErrorMessage = string.Empty;
+    private List<SaveMcpServerConfigRequest>? importPreviewConfigs;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshList();
+    }
+
+    private async Task RefreshList()
+    {
+        if (_disposed) return;
+        
+        loading = true;
+        await SafeStateHasChangedAsync();
+
+        try
+        {
+            configs = await McpConfigService.GetAllConfigsAsync();
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Error($"加载配置失败: {ex.Message}"));
+            }
+        }
+        finally
+        {
+            if (!_disposed)
+            {
+                loading = false;
+                await SafeStateHasChangedAsync();
+            }
+        }
+    }
+
+    private void ShowAddDialog()
+    {
+        editingConfig = new SaveMcpServerConfigRequest
+        {
+            TransportType = "stdio",
+            IsEnabled = true
+        };
+        argumentsText = string.Empty;
+        envVarsText = string.Empty;
+        dialogVisible = true;
+    }
+
+    private void ShowEditDialog(McpServerConfigDto config)
+    {
+        editingConfig = new SaveMcpServerConfigRequest
+        {
+            Id = config.Id,
+            Name = config.Name,
+            Description = config.Description,
+            TransportType = config.TransportType,
+            Command = config.Command,
+            Arguments = config.Arguments,
+            ServerUrl = config.ServerUrl,
+            RequiresAuth = config.RequiresAuth,
+            OAuthClientId = config.OAuthClientId,
+            OAuthRedirectUri = config.OAuthRedirectUri,
+            IsEnabled = config.IsEnabled,
+            EnvironmentVariables = config.EnvironmentVariables,
+            Remarks = config.Remarks
+        };
+
+        argumentsText = config.Arguments != null ? string.Join("\n", config.Arguments) : string.Empty;
+        envVarsText = config.EnvironmentVariables != null 
+            ? string.Join("\n", config.EnvironmentVariables.Select(kv => $"{kv.Key}={kv.Value}"))
+            : string.Empty;
+
+        dialogVisible = true;
+    }
+
+    private void CloseDialog()
+    {
+        dialogVisible = false;
+        editingConfig = null;
+    }
+
+    private async Task SaveConfig()
+    {
+        if (_disposed) return;
+        
+        if (editingConfig == null || string.IsNullOrWhiteSpace(editingConfig.Name))
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Warning("请填写完整信息"));
+            }
+            return;
+        }
+
+        // 解析参数和环境变量
+        if (!string.IsNullOrWhiteSpace(argumentsText))
+        {
+            editingConfig.Arguments = argumentsText
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => s.Trim())
+                .Where(s => !string.IsNullOrEmpty(s))
+                .ToList();
+        }
+
+        if (!string.IsNullOrWhiteSpace(envVarsText))
+        {
+            editingConfig.EnvironmentVariables = envVarsText
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => s.Trim())
+                .Where(s => s.Contains('='))
+                .Select(s => s.Split('=', 2))
+                .ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim());
+        }
+
+        saving = true;
+        await SafeStateHasChangedAsync();
+
+        try
+        {
+            await McpConfigService.SaveConfigAsync(editingConfig);
+            
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Success("保存成功"));
+                dialogVisible = false;
+                await RefreshList();
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Error($"保存失败: {ex.Message}"));
+            }
+        }
+        finally
+        {
+            if (!_disposed)
+            {
+                saving = false;
+                await SafeStateHasChangedAsync();
+            }
+        }
+    }
+
+    private async Task ToggleEnabled(int id, bool enabled)
+    {
+        if (_disposed) return;
+        
+        try
+        {
+            await McpConfigService.ToggleEnabledAsync(id);
+            
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Success(enabled ? "已启用" : "已禁用"));
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Error($"操作失败: {ex.Message}"));
+                await RefreshList();
+            }
+        }
+    }
+
+    private async Task DeleteConfig(int id)
+    {
+        if (_disposed) return;
+        
+        try
+        {
+            await McpConfigService.DeleteConfigAsync(id);
+            
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Success("删除成功"));
+                await RefreshList();
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Error($"删除失败: {ex.Message}"));
+            }
+        }
+    }
+
+    private async Task TestServer(int id)
+    {
+        if (_disposed) return;
+        
+        if (!_disposed)
+        {
+            await InvokeAsync(() => Message.Loading("正在测试连接...", 0));
+        }
+
+        try
+        {
+            testResult = await McpConfigService.TestServerAsync(id);
+            if (!_disposed)
+            {
+                testResultVisible = true;
+                await SafeStateHasChangedAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                testResult = new McpServerTestResult
+                {
+                    Success = false,
+                    Message = "测试失败",
+                    Error = ex.Message
+                };
+                testResultVisible = true;
+                await SafeStateHasChangedAsync();
+            }
+        }
+        finally
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Destroy());
+            }
+        }
+    }
+
+    private void ShowImportDialog()
+    {
+        importJsonText = string.Empty;
+        importErrorMessage = string.Empty;
+        importPreviewConfigs = null;
+        importDialogVisible = true;
+    }
+
+    private void CloseImportDialog()
+    {
+        importDialogVisible = false;
+        importJsonText = string.Empty;
+        importErrorMessage = string.Empty;
+        importPreviewConfigs = null;
+    }
+
+    private async Task ImportFromJson()
+    {
+        if (_disposed) return;
+        
+        if (string.IsNullOrWhiteSpace(importJsonText))
+        {
+            importErrorMessage = "请输入 JSON 内容";
+            await SafeStateHasChangedAsync();
+            return;
+        }
+
+        importing = true;
+        importErrorMessage = string.Empty;
+        await SafeStateHasChangedAsync();
+
+        try
+        {
+            List<SaveMcpServerConfigRequest> configsToImport;
+            
+            // 如果已经有预览配置,直接使用;否则先解析
+            if (importPreviewConfigs != null && importPreviewConfigs.Count > 0)
+            {
+                configsToImport = importPreviewConfigs;
+            }
+            else
+            {
+                // 解析 JSON
+                configsToImport = ParseMcpJson(importJsonText);
+                
+                if (configsToImport == null || configsToImport.Count == 0)
+                {
+                    importErrorMessage = "未找到有效的 MCP 服务器配置";
+                    importing = false;
+                    await SafeStateHasChangedAsync();
+                    return;
+                }
+
+                // 第一次点击,显示预览
+                importPreviewConfigs = configsToImport;
+                importing = false;
+                await SafeStateHasChangedAsync();
+                return;
+            }
+
+            // 批量保存
+            int successCount = 0;
+            int failCount = 0;
+            
+            foreach (var config in configsToImport)
+            {
+                try
+                {
+                    await McpConfigService.SaveConfigAsync(config);
+                    successCount++;
+                }
+                catch
+                {
+                    failCount++;
+                }
+            }
+
+            if (!_disposed)
+            {
+                if (failCount == 0)
+                {
+                    await InvokeAsync(() => Message.Success($"成功导入 {successCount} 个配置"));
+                    CloseImportDialog();
+                    await RefreshList();
+                }
+                else
+                {
+                    await InvokeAsync(() => Message.Warning($"导入完成: 成功 {successCount} 个,失败 {failCount} 个"));
+                    CloseImportDialog();
+                    await RefreshList();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            importErrorMessage = $"解析失败: {ex.Message}";
+            importPreviewConfigs = null;
+        }
+        finally
+        {
+            if (!_disposed)
+            {
+                importing = false;
+                await SafeStateHasChangedAsync();
+            }
+        }
+    }
+
+    private List<SaveMcpServerConfigRequest> ParseMcpJson(string json)
+    {
+        var result = new List<SaveMcpServerConfigRequest>();
+        
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(json);
+            
+            if (!doc.RootElement.TryGetProperty("mcpServers", out var serversElement))
+            {
+                throw new Exception("JSON 格式错误: 缺少 'mcpServers' 字段");
+            }
+
+            foreach (var serverProperty in serversElement.EnumerateObject())
+            {
+                var serverName = serverProperty.Name;
+                var serverConfig = serverProperty.Value;
+                
+                var config = new SaveMcpServerConfigRequest
+                {
+                    Name = serverName,
+                    IsEnabled = true
+                };
+
+                // 判断是 STDIO 还是 SSE/HTTP
+                if (serverConfig.TryGetProperty("command", out var commandElement))
+                {
+                    // STDIO 格式
+                    config.TransportType = "stdio";
+                    config.Command = commandElement.GetString() ?? string.Empty;
+                    
+                    // 解析参数
+                    if (serverConfig.TryGetProperty("args", out var argsElement) && argsElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    {
+                        config.Arguments = new List<string>();
+                        foreach (var arg in argsElement.EnumerateArray())
+                        {
+                            if (arg.ValueKind == System.Text.Json.JsonValueKind.String)
+                            {
+                                config.Arguments.Add(arg.GetString() ?? string.Empty);
+                            }
+                        }
+                    }
+                    
+                    // 解析环境变量
+                    if (serverConfig.TryGetProperty("env", out var envElement) && envElement.ValueKind == System.Text.Json.JsonValueKind.Object)
+                    {
+                        config.EnvironmentVariables = new Dictionary<string, string>();
+                        foreach (var envProp in envElement.EnumerateObject())
+                        {
+                            config.EnvironmentVariables[envProp.Name] = envProp.Value.GetString() ?? string.Empty;
+                        }
+                    }
+                }
+                else if (serverConfig.TryGetProperty("url", out var urlElement))
+                {
+                    // SSE/HTTP 格式
+                    var url = urlElement.GetString() ?? string.Empty;
+                    
+                    // 根据 URL 判断类型
+                    if (url.Contains("/sse", StringComparison.OrdinalIgnoreCase))
+                    {
+                        config.TransportType = "http";
+                        config.Description = "SSE 远程服务";
+                    }
+                    else
+                    {
+                        config.TransportType = "http";
+                    }
+                    
+                    config.ServerUrl = url;
+                }
+                else
+                {
+                    throw new Exception($"服务器 '{serverName}' 配置格式不正确: 必须包含 'command' 或 'url' 字段");
+                }
+
+                result.Add(config);
+            }
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            throw new Exception($"JSON 解析错误: {ex.Message}");
+        }
+
+        return result;
+    }
+
+    private async Task SafeStateHasChangedAsync()
+    {
+        if (!_disposed)
+        {
+            try
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (ObjectDisposedException)
+            {
+                // 组件已销毁,忽略
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+    }
+}

@@ -1,0 +1,203 @@
+@page "/blog/detail/{TaskId:int}"
+@using BlogAgent.Domain.Domain.Model
+@using BlogAgent.Domain.Domain.Dto
+@using BlogAgent.Domain.Services
+@inject BlogService BlogService
+@inject NavigationManager Navigation
+@inject IMessageService Message
+
+<PageHeader Title="博客详情" OnBack="@(() => Navigation.NavigateTo("/blog/list"))">
+    <PageHeaderExtra>
+        <Space>
+            @if (content != null && !content.IsPublished)
+            {
+                <SpaceItem>
+                    <Button Type="@ButtonType.Primary" OnClick="@PublishBlog" Loading="@publishing">
+                        <Icon Type="check-circle" /> 发布
+                    </Button>
+                </SpaceItem>
+            }
+            <SpaceItem>
+                <Button OnClick="@ExportMarkdown" Loading="@exporting">
+                    <Icon Type="download" /> 导出Markdown
+                </Button>
+            </SpaceItem>
+            @if (content != null)
+            {
+                <SpaceItem>
+                    <Button OnClick="@(() => Navigation.NavigateTo($"/blog/workflow/{TaskId}"))">
+                        <Icon Type="edit" /> 编辑
+                    </Button>
+                </SpaceItem>
+            }
+        </Space>
+    </PageHeaderExtra>
+</PageHeader>
+
+@if (loading)
+{
+    <Card>
+        <div style="text-align:center; padding: 60px 0;">
+            <Spin Size="SpinSize.Large" />
+        </div>
+    </Card>
+}
+else if (content != null)
+{
+    <Card>
+        <Descriptions Title="基本信息" Bordered Column="2" Size="DescriptionsSize.Small" Style="margin-bottom:30px;">
+            <DescriptionsItem Title="标题" Span="2">
+                <Title Level="3">@content.Title</Title>
+            </DescriptionsItem>
+            <DescriptionsItem Title="状态">
+                @if (content.IsPublished)
+                {
+                    <Tag Color="TagColor.Success">已发布</Tag>
+                }
+                else
+                {
+                    <Tag Color="TagColor.Default">草稿</Tag>
+                }
+            </DescriptionsItem>
+            <DescriptionsItem Title="字数">
+                @content.WordCount 字
+            </DescriptionsItem>
+            <DescriptionsItem Title="创建时间">
+                @content.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
+            </DescriptionsItem>
+            <DescriptionsItem Title="发布时间">
+                @(content.PublishedAt?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-")
+            </DescriptionsItem>
+        </Descriptions>
+
+        @if (reviewResult != null)
+        {
+            <Descriptions Title="审查结果" Bordered Column="4" Size="DescriptionsSize.Small" Style="margin-bottom:30px;">
+                <DescriptionsItem Title="综合评分">
+                    <Progress Percent="@reviewResult.OverallScore" 
+                              Status="@(reviewResult.OverallScore >= 80 ? ProgressStatus.Success : ProgressStatus.Normal)" 
+                              Style="width:120px;" />
+                </DescriptionsItem>
+                <DescriptionsItem Title="准确性">@reviewResult.Accuracy.Score / 40</DescriptionsItem>
+                <DescriptionsItem Title="逻辑性">@reviewResult.Logic.Score / 30</DescriptionsItem>
+                <DescriptionsItem Title="原创性">@reviewResult.Originality.Score / 20</DescriptionsItem>
+                <DescriptionsItem Title="规范性">@reviewResult.Formatting.Score / 10</DescriptionsItem>
+                <DescriptionsItem Title="审查建议" Span="3">
+                    <Tag Color="@(reviewResult.Recommendation == "通过" ? "success" : "warning")">
+                        @reviewResult.Recommendation
+                    </Tag>
+                </DescriptionsItem>
+                @if (!string.IsNullOrEmpty(reviewResult.Summary))
+                {
+                    <DescriptionsItem Title="审查总结" Span="4">
+                        @reviewResult.Summary
+                    </DescriptionsItem>
+                }
+            </Descriptions>
+        }
+
+        <Divider Orientation="DividerOrientation.Left">
+            <Title Level="4">博客内容</Title>
+        </Divider>
+
+        <Card Type="CardType.Inner" Style="background:#fafafa;">
+            <Markdown Value="@content.Content" />
+        </Card>
+    </Card>
+}
+else
+{
+    <Card>
+        <Empty Description="@("博客内容不存在")">
+            <Button Type="@ButtonType.Primary" OnClick="@(() => Navigation.NavigateTo("/blog/list"))">
+                返回列表
+            </Button>
+        </Empty>
+    </Card>
+}
+
+@code {
+    [Parameter] public int TaskId { get; set; }
+
+    private bool loading = false;
+    private bool publishing = false;
+    private bool exporting = false;
+    private BlogContent? content;
+    private ReviewResultDto? reviewResult;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        loading = true;
+        try
+        {
+            content = await BlogService.GetContentAsync(TaskId);
+            
+            if (content != null)
+            {
+                reviewResult = await BlogService.GetReviewResultAsync(TaskId);
+            }
+        }
+        catch (Exception ex)
+        {
+            Message.Error($"加载数据失败: {ex.Message}");
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task PublishBlog()
+    {
+        publishing = true;
+        try
+        {
+            var success = await BlogService.PublishBlogAsync(TaskId);
+
+            if (success)
+            {
+                Message.Success("发布成功!");
+                await LoadData();
+            }
+            else
+            {
+                Message.Error("发布失败");
+            }
+        }
+        catch (Exception ex)
+        {
+            Message.Error($"发布失败: {ex.Message}");
+        }
+        finally
+        {
+            publishing = false;
+        }
+    }
+
+    private async Task ExportMarkdown()
+    {
+        exporting = true;
+        try
+        {
+            // 使用应用根目录的exports文件夹
+            var exportPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "exports");
+            var filePath = await BlogService.ExportToMarkdownAsync(TaskId, exportPath);
+
+            Message.Success($"导出成功: {Path.GetFileName(filePath)}");
+        }
+        catch (Exception ex)
+        {
+            Message.Error($"导出失败: {ex.Message}");
+        }
+        finally
+        {
+            exporting = false;
+        }
+    }
+}
+

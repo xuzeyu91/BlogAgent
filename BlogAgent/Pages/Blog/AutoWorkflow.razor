@@ -1,0 +1,453 @@
+@page "/blog/auto-workflow/{TaskId:int}"
+@using BlogAgent.Domain.Domain.Dto
+@using BlogAgent.Domain.Services
+@using BlogAgent.Domain.Services.Workflows
+@inject BlogAgentWorkflowService AgentWorkflowService
+@inject BlogService BlogService
+@inject NavigationManager Navigation
+@inject IMessageService Message
+@implements IDisposable
+
+<PageHeader Title="智能博客生成工作流 (Agent Framework)">
+    <PageHeaderBreadcrumb>
+        <Breadcrumb>
+            <BreadcrumbItem Href="/blog/list">博客管理</BreadcrumbItem>
+            <BreadcrumbItem>自动化工作流</BreadcrumbItem>
+        </Breadcrumb>
+    </PageHeaderBreadcrumb>
+    <PageHeaderContent>
+        <Alert Type="@AlertType.Info" Message="使用 Microsoft Agent Framework Workflow 自动编排博客生成流程" ShowIcon="true" />
+    </PageHeaderContent>
+    <PageHeaderExtra>
+        <Button OnClick="@(() => Navigation.NavigateTo($"/blog/workflow/{TaskId}"))">
+            <Icon Type="edit" /> 切换到分步模式
+        </Button>
+    </PageHeaderExtra>
+</PageHeader>
+
+<div style="padding:24px; border-radius: 12px; margin-bottom: 24px; box-shadow: 0 4px 20px rgba(102, 126, 234, 0.25);">
+    <Steps Current="@currentStep" Status="@stepStatus" Type="StepsType.Navigation" Size="StepsSize.Default" 
+           Style="background: white; padding: 24px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+        <Step Title="资料收集" Description="ResearcherAgent 自动执行" Icon="file-search" />
+        <Step Title="博客撰写" Description="WriterAgent 自动执行" Icon="edit" />
+        <Step Title="质量审查" Description="ReviewerAgent 自动执行" Icon="audit" />
+        <Step Title="完成" Description="工作流执行完毕" Icon="check-circle" />
+    </Steps>
+</div>
+
+<Card Title="@currentStageTitle">
+    @if (!workflowStarted && !workflowCompleted)
+    {
+        <Result Status="ResultStatus.Info"
+                Title="准备启动智能博客生成工作流"
+                SubTitle="点击下方按钮,系统将自动执行资料收集、博客撰写和质量审查三个阶段">
+            <Extra>
+                <Button Type="@ButtonType.Primary" Size="@ButtonSize.Large" OnClick="@StartWorkflow" Loading="@workflowExecuting">
+                    <Icon Type="rocket" /> 启动工作流
+                </Button>
+            </Extra>
+        </Result>
+    }
+    else if (workflowExecuting)
+    {
+        <div style="text-align:center; padding: 40px 0;">
+            <Spin Size="SpinSize.Large" />
+            <p style="margin-top:30px; font-size:20px; font-weight:600; color:#7F7FFF;">@executionMessage</p>
+            <p style="color:#999; margin-top:10px; font-size:14px;">
+                <Icon Type="clock-circle" /> 工作流正在自动运行,各个 Agent 依次执行... (轮询次数: @_pollingCount)
+            </p>
+            
+            <!-- 始终显示进度卡片,即使 currentAgentOutput 为空 -->
+            <Card Title="@($"{GetCurrentAgentIcon()} 执行进度")" Size="CardSize.Small" 
+                  Style="margin-top:30px; text-align:left; max-width:900px; margin-left:auto; margin-right:auto; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                
+                <div style="padding: 20px; border-radius: 8px; color: white; margin-bottom: 20px;">
+                    <h3 style="margin: 0; font-size: 18px; display: flex; align-items: center; gap: 10px;">
+                        @if (currentStep == 0)
+                        {
+                            <Icon Type="file-search" Style="font-size: 24px;" />
+                            <span>ResearcherAgent 正在工作</span>
+                        }
+                        else if (currentStep == 1)
+                        {
+                            <Icon Type="edit" Style="font-size: 24px;" />
+                            <span>WriterAgent 正在工作</span>
+                        }
+                        else if (currentStep == 2)
+                        {
+                            <Icon Type="audit" Style="font-size: 24px;" />
+                            <span>ReviewerAgent 正在工作</span>
+                        }
+                        else
+                        {
+                            <Icon Type="loading" Style="font-size: 24px;" />
+                            <span>准备中...</span>
+                        }
+                    </h3>
+                </div>
+                
+                <div style="background: #f6f8fa; padding: 20px; border-radius: 8px; font-family: 'Consolas', 'Monaco', monospace; white-space: pre-wrap; line-height: 1.8; color: #24292e; font-size: 14px; border-left: 4px solid #667eea;">
+                    @if (!string.IsNullOrEmpty(currentAgentOutput))
+                    {
+                        @currentAgentOutput
+                    }
+                    else
+                    {
+                        <text>⏳ 正在等待 Agent 响应...</text>
+                    }
+                </div>
+                
+                <Timeline Style="margin-top: 20px;">
+                    <TimelineItem Color="@(currentStep >= 0 ? "green" : "gray")">
+                        <Icon Type="file-search" /> 资料收集阶段 @(currentStep > 0 ? "✓" : "●")
+                        @if (currentStep == 0)
+                        {
+                            <Tag Color="@("blue")" Style="margin-left: 10px;">进行中</Tag>
+                        }
+                    </TimelineItem>
+                    <TimelineItem Color="@(currentStep >= 1 ? "green" : currentStep == 0 ? "blue" : "gray")">
+                        <Icon Type="edit" /> 博客撰写阶段 @(currentStep > 1 ? "✓" : currentStep == 1 ? "●" : "")
+                        @if (currentStep == 1)
+                        {
+                            <Tag Color="@("blue")" Style="margin-left: 10px;">进行中</Tag>
+                        }
+                    </TimelineItem>
+                    <TimelineItem Color="@(currentStep >= 2 ? "green" : currentStep == 1 ? "blue" : "gray")">
+                        <Icon Type="audit" /> 质量审查阶段 @(currentStep > 2 ? "✓" : currentStep == 2 ? "●" : "")
+                        @if (currentStep == 2)
+                        {
+                            <Tag Color="@("blue")" Style="margin-left: 10px;">进行中</Tag>
+                        }
+                    </TimelineItem>
+                    <TimelineItem Color="@(currentStep >= 3 ? "green" : "gray")">
+                        <Icon Type="check-circle" /> 完成 @(currentStep >= 3 ? "✓" : "")
+                    </TimelineItem>
+                </Timeline>
+            </Card>
+        </div>
+    }
+    else if (workflowCompleted)
+    {
+        <Result Status="@(workflowSuccess ? ResultStatus.Success : ResultStatus.Error)"
+                Title="@(workflowSuccess ? "🎉 博客生成工作流执行成功!" : "❌ 工作流执行失败")"
+                SubTitle="@resultMessage">
+            <Extra>
+                @if (workflowSuccess)
+                {
+                    <Space>
+                        <SpaceItem>
+                            <Button Type="@ButtonType.Primary" OnClick="@(() => Navigation.NavigateTo($"/blog/detail/{TaskId}"))">
+                                <Icon Type="eye" /> 查看博客详情
+                            </Button>
+                        </SpaceItem>
+                        <SpaceItem>
+                            <Button OnClick="@(() => Navigation.NavigateTo("/blog/list"))">
+                                <Icon Type="unordered-list" /> 博客列表
+                            </Button>
+                        </SpaceItem>
+                        <SpaceItem>
+                            <Button OnClick="@(() => Navigation.NavigateTo("/blog/create"))">
+                                <Icon Type="plus" /> 创建新博客
+                            </Button>
+                        </SpaceItem>
+                    </Space>
+                }
+                else
+                {
+                    <Space>
+                        <SpaceItem>
+                            <Button Type="@ButtonType.Primary" OnClick="@StartWorkflow">
+                                <Icon Type="redo" /> 重新执行
+                            </Button>
+                        </SpaceItem>
+                        <SpaceItem>
+                            <Button OnClick="@(() => Navigation.NavigateTo($"/blog/workflow/{TaskId}"))">
+                                <Icon Type="edit" /> 分步调试
+                            </Button>
+                        </SpaceItem>
+                    </Space>
+                }
+            </Extra>
+        </Result>
+
+        @if (workflowSuccess && reviewResult != null)
+        {
+            <Divider />
+            
+            <Descriptions Title="质量评估报告" Bordered Column="2" Style="margin-top:20px;">
+                <DescriptionsItem Title="综合评分" Span="2">
+                    <Progress Percent="@reviewResult.OverallScore"
+                              Status="@(reviewResult.OverallScore >= 80 ? ProgressStatus.Success : reviewResult.OverallScore >= 60 ? ProgressStatus.Normal : ProgressStatus.Exception)"
+                              StrokeWidth="20" />
+                </DescriptionsItem>
+                <DescriptionsItem Title="准确性">
+                    <Tag Color="@(reviewResult.Accuracy.Score >= 32 ? "success" : "warning")">@reviewResult.Accuracy.Score / 40</Tag>
+                </DescriptionsItem>
+                <DescriptionsItem Title="逻辑性">
+                    <Tag Color="@(reviewResult.Logic.Score >= 24 ? "success" : "warning")">@reviewResult.Logic.Score / 30</Tag>
+                </DescriptionsItem>
+                <DescriptionsItem Title="原创性">
+                    <Tag Color="@(reviewResult.Originality.Score >= 16 ? "success" : "warning")">@reviewResult.Originality.Score / 20</Tag>
+                </DescriptionsItem>
+                <DescriptionsItem Title="规范性">
+                    <Tag Color="@(reviewResult.Formatting.Score >= 8 ? "success" : "warning")">@reviewResult.Formatting.Score / 10</Tag>
+                </DescriptionsItem>
+                <DescriptionsItem Title="审查建议" Span="2">
+                    <Tag Color="@(reviewResult.Recommendation == "通过" ? "success" : reviewResult.Recommendation == "需修改" ? "warning" : "error")" Style="font-size:16px; padding:5px 15px;">
+                        @reviewResult.Recommendation
+                    </Tag>
+                </DescriptionsItem>
+            </Descriptions>
+        }
+    }
+</Card>
+
+@code {
+    [Parameter] public int TaskId { get; set; }
+
+    private int currentStep = 0;
+    private StepsStatus stepStatus = StepsStatus.Process;
+    private string currentStageTitle = "智能博客生成工作流";
+    
+    private bool workflowStarted = false;
+    private bool workflowExecuting = false;
+    private bool workflowCompleted = false;
+    private bool workflowSuccess = false;
+    
+    private string executionMessage = "";
+    private string resultMessage = "";
+    private string currentAgentOutput = "";
+    
+    private ReviewResultDto? reviewResult;
+    private bool _disposed = false;
+    
+    private System.Threading.Timer? _progressTimer;
+    private int _pollingCount = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // 检查工作流状态
+        try
+        {
+            var state = await AgentWorkflowService.GetWorkflowStateAsync(TaskId);
+            
+            if (state.IsPublished || state.HasReviewResult)
+            {
+                workflowCompleted = true;
+                workflowSuccess = true;
+                currentStep = 3;
+                stepStatus = StepsStatus.Finish;
+                resultMessage = "工作流已完成,博客生成成功!";
+                
+                if (state.HasReviewResult)
+                {
+                    reviewResult = await BlogService.GetReviewResultAsync(TaskId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            await InvokeAsync(() => Message.Warning($"无法加载工作流状态: {ex.Message}"));
+        }
+    }
+
+    private async Task StartWorkflow()
+    {
+        workflowStarted = true;
+        workflowExecuting = true;
+        workflowCompleted = false;
+        currentStep = 0;
+        executionMessage = "正在启动工作流...";
+        _pollingCount = 0;
+        await SafeStateHasChangedAsync();
+
+        try
+        {
+            // 启动进度轮询 (每 1 秒查询一次，更实时)
+            _progressTimer = new System.Threading.Timer(async _ => await PollProgress(), null, 500, 1000);
+            
+            // 在后台执行工作流
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var result = await AgentWorkflowService.ExecuteFullWorkflowAsync(TaskId);
+                    
+                    if (!_disposed)
+                    {
+                        // 等待最后一次轮询完成
+                        await Task.Delay(500);
+                        
+                        // 停止轮询
+                        _progressTimer?.Dispose();
+                        _progressTimer = null;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (!_disposed)
+                    {
+                        _progressTimer?.Dispose();
+                        _progressTimer = null;
+                        
+                        workflowSuccess = false;
+                        stepStatus = StepsStatus.Error;
+                        resultMessage = $"执行异常: {ex.Message}";
+                        workflowExecuting = false;
+                        workflowCompleted = true;
+                        
+                        await InvokeAsync(() =>
+                        {
+                            Message.Error($"执行失败: {ex.Message}");
+                            StateHasChanged();
+                        });
+                    }
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                workflowSuccess = false;
+                stepStatus = StepsStatus.Error;
+                resultMessage = $"启动失败: {ex.Message}";
+                workflowExecuting = false;
+                workflowCompleted = true;
+                
+                await InvokeAsync(() => Message.Error($"启动失败: {ex.Message}"));
+                await SafeStateHasChangedAsync();
+            }
+        }
+    }
+
+    private async Task PollProgress()
+    {
+        if (_disposed || !workflowExecuting) return;
+
+        try
+        {
+            _pollingCount++;
+            
+            // 获取最新进度
+            var progress = AgentWorkflowService.GetWorkflowProgress(TaskId);
+            
+            // 调试信息
+            Console.WriteLine($"[PollProgress] 轮询次数: {_pollingCount}, 进度对象: {(progress != null ? "存在" : "null")}");
+            
+            if (progress != null)
+            {
+                Console.WriteLine($"[PollProgress] CurrentStep: {progress.CurrentStep}, Message: {progress.Message}, Output: {progress.CurrentOutput?.Substring(0, Math.Min(50, progress.CurrentOutput?.Length ?? 0))}");
+                
+                await InvokeAsync(() =>
+                {
+                    currentStep = progress.CurrentStep;
+                    executionMessage = progress.Message;
+                    currentAgentOutput = progress.CurrentOutput ?? "";
+                    
+                    Console.WriteLine($"[UI更新] currentStep: {currentStep}, executionMessage: {executionMessage}");
+                    
+                    // 更新步骤状态
+                    if (progress.Status == "failed")
+                    {
+                        stepStatus = StepsStatus.Error;
+                    }
+                    else if (progress.IsCompleted)
+                    {
+                        stepStatus = StepsStatus.Finish;
+                    }
+                    else
+                    {
+                        stepStatus = StepsStatus.Process;
+                    }
+                    
+                    // 检查是否完成
+                    if (progress.IsCompleted)
+                    {
+                        workflowExecuting = false;
+                        workflowCompleted = true;
+                        workflowSuccess = progress.IsSuccess;
+                        
+                        if (progress.IsSuccess)
+                        {
+                            resultMessage = "所有阶段已完成,博客生成成功!";
+                            reviewResult = progress.ReviewResult;
+                             Message.Success("🎉 博客生成工作流执行成功!");
+                        }
+                        else
+                        {
+                            resultMessage = $"工作流执行失败: {progress.ErrorMessage}";
+                             Message.Error($"工作流执行失败: {progress.ErrorMessage}");
+                        }
+                        
+                        // 停止轮询
+                        _progressTimer?.Dispose();
+                        _progressTimer = null;
+                    }
+                    
+                    StateHasChanged();
+                });
+            }
+            else
+            {
+                Console.WriteLine($"[PollProgress] 进度对象为 null, 轮询次数: {_pollingCount}");
+                
+                if (_pollingCount > 300) // 5分钟超时 (300 * 1秒)
+                {
+                    await InvokeAsync(() =>
+                    {
+                        workflowExecuting = false;
+                        workflowCompleted = true;
+                        workflowSuccess = false;
+                        resultMessage = "工作流执行超时";
+                        stepStatus = StepsStatus.Error;
+                        
+                        _progressTimer?.Dispose();
+                        _progressTimer = null;
+                        
+                         Message.Error("工作流执行超时");
+                        StateHasChanged();
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // 轮询出错不中断整个流程
+            Console.WriteLine($"轮询进度出错: {ex.Message}");
+        }
+    }
+
+    private async Task SafeStateHasChangedAsync()
+    {
+        if (!_disposed)
+        {
+            try
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (ObjectDisposedException)
+            {
+                // 组件已被销毁,忽略
+            }
+        }
+    }
+
+    private string GetCurrentAgentIcon()
+    {
+        return currentStep switch
+        {
+            0 => "🔍 ResearcherAgent",
+            1 => "✍️ WriterAgent",
+            2 => "🔎 ReviewerAgent",
+            _ => "✅"
+        };
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _progressTimer?.Dispose();
+        _progressTimer = null;
+    }
+}

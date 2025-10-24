@@ -1,0 +1,31 @@
+@namespace BlogAgent.Components
+@using Markdig
+
+<div class="markdown-body @CssClass" @attributes="AdditionalAttributes">
+    @if (!string.IsNullOrWhiteSpace(Value))
+    {
+        @((MarkupString)_htmlContent)
+    }
+    else if (!string.IsNullOrWhiteSpace(Placeholder))
+    {
+        <span class="markdown-placeholder">@Placeholder</span>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+    [Parameter] public string? Placeholder { get; set; }
+    [Parameter(CaptureUnmatchedValues = true)] public Dictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private string _htmlContent = string.Empty;
+    private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .Build();
+
+    protected override void OnParametersSet()
+    {
+        var content = Value ?? string.Empty;
+        _htmlContent = Markdig.Markdown.ToHtml(content, Pipeline);
+    }
+}

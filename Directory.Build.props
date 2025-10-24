@@ -1,0 +1,8 @@
+<Project>
+  <!-- See https://aka.ms/dotnet/msbuild/customize for more details on customizing your build -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <AFVersion> 1.0.0-preview.251016.1</AFVersion>
+    <NetVersion>9.0.5</NetVersion>
+  </PropertyGroup>
+</Project>

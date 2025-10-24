@@ -1,0 +1,808 @@
+@page "/blog/workflow/{TaskId:int}"
+@using BlogAgent.Domain.Domain.Dto
+@using BlogAgent.Domain.Domain.Enum
+@using BlogAgent.Domain.Services
+@using BlogAgent.Domain.Services.Workflows
+@inject BlogWorkflowService WorkflowService
+@inject BlogAgentWorkflowService AgentWorkflowService
+@inject BlogService BlogService
+@inject NavigationManager Navigation
+@inject IMessageService Message
+@implements IDisposable
+
+<PageHeader Title="博客生成工作流 (分步模式)">
+    <PageHeaderBreadcrumb>
+        <Breadcrumb>
+            <BreadcrumbItem Href="/blog/list">博客管理</BreadcrumbItem>
+            <BreadcrumbItem>工作流执行</BreadcrumbItem>
+        </Breadcrumb>
+    </PageHeaderBreadcrumb>
+    <PageHeaderExtra>
+        <Button OnClick="@(() => Navigation.NavigateTo($"/blog/auto-workflow/{TaskId}"))">
+            <Icon Type="rocket" /> 切换到全自动模式
+        </Button>
+    </PageHeaderExtra>
+</PageHeader>
+
+<div style="padding:24px; border-radius: 12px; margin-bottom: 24px; box-shadow: 0 4px 20px rgba(102, 126, 234, 0.25);">
+    <Steps Current="@currentStep" Status="@stepStatus" Type="StepsType.Navigation" Size="StepsSize.Default" 
+           Style="background: white; padding: 24px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+        <Step Title="资料收集" Description="ResearcherAgent 分步执行" Icon="file-search" />
+        <Step Title="博客撰写" Description="WriterAgent 分步执行" Icon="edit" />
+        <Step Title="质量审查" Description="ReviewerAgent 分步执行" Icon="audit" />
+        <Step Title="完成" Description="工作流执行完毕" Icon="check-circle" />
+    </Steps>
+</div>
+
+<Card Title="@currentStageTitle">
+    @if (currentStage == "research")
+    {
+        <div>
+            @if (researchResult == null && !stageExecuting)
+            {
+                <Result Status="ResultStatus.Info"
+                        Title="准备开始资料收集阶段"
+                        SubTitle="ResearcherAgent 将收集和整理与主题相关的资料">
+                    <Extra>
+                        <Button Type="@ButtonType.Primary" Size="@ButtonSize.Large" OnClick="@ExecuteResearchStage" Loading="@stageExecuting">
+                            <Icon Type="play-circle" /> 开始收集资料
+                        </Button>
+                    </Extra>
+                </Result>
+            }
+            else if (stageExecuting)
+            {
+                <div style="text-align:center; padding: 40px 0;">
+                    <Spin Size="SpinSize.Large" />
+                    <p style="margin-top:30px; font-size:20px; font-weight:600; color:#7F7FFF;">正在收集和整理资料...</p>
+                    <p style="color:#999; margin-top:10px; font-size:14px;">
+                        <Icon Type="clock-circle" /> ResearcherAgent 正在工作,这可能需要30秒到1分钟
+                    </p>
+                </div>
+            }
+            else if (researchResult != null)
+            {
+                <Result Status="ResultStatus.Success"
+                        Title="✅ 资料收集完成!"
+                        SubTitle="ResearcherAgent 已完成资料收集和整理">
+                    <Extra>
+                        <Space>
+                            <SpaceItem>
+                                <Button Type="@ButtonType.Primary" Size="@ButtonSize.Large" OnClick="@ProceedToWriteStage" Disabled="@editingResearch">
+                                    <Icon Type="arrow-right" /> 继续撰写
+                                </Button>
+                            </SpaceItem>
+                            <SpaceItem>
+                                <Button Size="@ButtonSize.Large" OnClick="@ToggleEditResearch">
+                                    <Icon Type="@(editingResearch ? "save" : "edit")" /> @(editingResearch ? "保存修改" : "编辑资料")
+                                </Button>
+                            </SpaceItem>
+                            <SpaceItem>
+                                <Button Size="@ButtonSize.Large" OnClick="@ExecuteResearchStage" Disabled="@editingResearch">
+                                    <Icon Type="redo" /> 重新收集
+                                </Button>
+                            </SpaceItem>
+                        </Space>
+                    </Extra>
+                </Result>
+
+                <Divider />
+
+                @if (editingResearch)
+                {
+                    <Card Title="编辑资料摘要" Style="margin-top:20px;">
+                        <TextArea @bind-Value="@researchSummaryEdit" 
+                                  Rows="20" 
+                                  Placeholder="编辑资料摘要..." 
+                                  Style="font-size: 14px; line-height: 1.8; width:100%;" />
+                    </Card>
+                }
+                else
+                {
+                    <Card Title="📝 资料摘要" Style="margin-top:20px;">
+                        <Markdown Value="@researchResult.Summary" />
+                    </Card>
+                }
+            }
+        </div>
+    }
+    else if (currentStage == "write")
+    {
+        <div>
+            @if (draftContent == null && !stageExecuting)
+            {
+                <Result Status="ResultStatus.Info"
+                        Title="准备开始博客撰写阶段"
+                        SubTitle="WriterAgent 将基于收集的资料撰写博客内容">
+                    <Extra>
+                        <Button Type="@ButtonType.Primary" Size="@ButtonSize.Large" OnClick="@ExecuteWriteStage" Loading="@stageExecuting">
+                            <Icon Type="play-circle" /> 开始撰写博客
+                        </Button>
+                    </Extra>
+                </Result>
+            }
+            else if (stageExecuting)
+            {
+                <div style="text-align:center; padding: 40px 0;">
+                    <Spin Size="SpinSize.Large" />
+                    <p style="margin-top:30px; font-size:20px; font-weight:600; color:#7F7FFF;">正在撰写博客内容...</p>
+                    <p style="color:#999; margin-top:10px; font-size:14px;">
+                        <Icon Type="clock-circle" /> WriterAgent 正在工作,这可能需要1-2分钟
+                    </p>
+                </div>
+            }
+            else if (draftContent != null)
+            {
+                <Result Status="ResultStatus.Success"
+                        Title="✅ 博客撰写完成!"
+                        SubTitle="WriterAgent 已完成博客内容撰写">
+                    <Extra>
+                        <Space>
+                            <SpaceItem>
+                                <Button Type="@ButtonType.Primary" Size="@ButtonSize.Large" OnClick="@ProceedToReviewStage" Disabled="@editingDraft">
+                                    <Icon Type="arrow-right" /> 提交审查
+                                </Button>
+                            </SpaceItem>
+                            <SpaceItem>
+                                <Button Size="@ButtonSize.Large" OnClick="@ToggleEditDraft">
+                                    <Icon Type="@(editingDraft ? "save" : "edit")" /> @(editingDraft ? "保存修改" : "编辑博客")
+                                </Button>
+                            </SpaceItem>
+                            <SpaceItem>
+                                <Button Size="@ButtonSize.Large" OnClick="@ExecuteWriteStage" Disabled="@editingDraft">
+                                    <Icon Type="redo" /> 重新撰写
+                                </Button>
+                            </SpaceItem>
+                        </Space>
+                    </Extra>
+                </Result>
+
+                <Divider />
+
+                @if (editingDraft)
+                {
+                    <Card Title="编辑博客" Style="margin-top:20px;">
+                        <div style="width:100%;">
+                            <div style="margin-bottom: 24px;">
+                                <div style="margin-bottom: 8px;"><strong>标题:</strong></div>
+                                <Input @bind-Value="@draftTitleEdit" Placeholder="编辑标题..." Size="@InputSize.Large" Style="width:100%;" />
+                            </div>
+                            <div style="margin-bottom: 24px;">
+                                <div style="margin-bottom: 8px;"><strong>内容:</strong></div>
+                                <TextArea @bind-Value="@draftContentEdit" 
+                                          Rows="25" 
+                                          Placeholder="编辑博客内容..." 
+                                          Style="font-size: 14px; line-height: 1.8; width:100%;" />
+                            </div>
+                        </div>
+                    </Card>
+                }
+                else
+                {
+                    <Card Title="@draftContent.Title" Style="margin-top:20px;">
+                        <Extra>
+                            <Tag Color="TagColor.Blue"><Icon Type="file-text" /> 字数: @draftContent.WordCount</Tag>
+                            <Tag Color="TagColor.Green"><Icon Type="clock-circle" /> @draftContent.GeneratedAt.ToString("yyyy-MM-dd HH:mm")</Tag>
+                        </Extra>
+                        <ChildContent>
+                            <Markdown Value="@draftContent.Content" />
+                        </ChildContent>
+                    </Card>
+                }
+            }
+        </div>
+    }
+    else if (currentStage == "review")
+    {
+        <div>
+            @if (reviewResult == null && !stageExecuting)
+            {
+                <Result Status="ResultStatus.Info"
+                        Title="准备开始质量审查阶段"
+                        SubTitle="ReviewerAgent 将评估博客内容的质量">
+                    <Extra>
+                        <Button Type="@ButtonType.Primary" Size="@ButtonSize.Large" OnClick="@ExecuteReviewStage" Loading="@stageExecuting">
+                            <Icon Type="play-circle" /> 开始质量审查
+                        </Button>
+                    </Extra>
+                </Result>
+            }
+            else if (stageExecuting)
+            {
+                <div style="text-align:center; padding: 40px 0;">
+                    <Spin Size="SpinSize.Large" />
+                    <p style="margin-top:30px; font-size:20px; font-weight:600; color:#7F7FFF;">正在进行质量审查...</p>
+                    <p style="color:#999; margin-top:10px; font-size:14px;">
+                        <Icon Type="clock-circle" /> ReviewerAgent 正在工作,这可能需要30秒到1分钟
+                    </p>
+                </div>
+            }
+            else if (reviewResult != null)
+            {
+                <Result Status="@(reviewResult.OverallScore >= 80 ? ResultStatus.Success : ResultStatus.Warning)"
+                        Title="@(reviewResult.OverallScore >= 80 ? "✅ 审查通过!" : "⚠️ 建议修改")"
+                        SubTitle="@(reviewResult.OverallScore >= 80 ? "ReviewerAgent 评估结果良好,可以发布" : "ReviewerAgent 建议修改后再发布")">
+                    <Extra>
+                        <Space>
+                            <SpaceItem>
+                                <Button Type="@ButtonType.Primary" Size="@ButtonSize.Large" OnClick="@PublishBlog" Loading="@publishing" Disabled="@editingReview">
+                                    <Icon Type="check-circle" /> 确认发布
+                                </Button>
+                            </SpaceItem>
+                            <SpaceItem>
+                                <Button Size="@ButtonSize.Large" OnClick="@ToggleEditReview">
+                                    <Icon Type="@(editingReview ? "save" : "edit")" /> @(editingReview ? "保存修改" : "编辑评审")
+                                </Button>
+                            </SpaceItem>
+                            <SpaceItem>
+                                <Button Size="@ButtonSize.Large" OnClick="@BackToWriteStage" Disabled="@editingReview">
+                                    <Icon Type="left" /> 返回修改
+                                </Button>
+                            </SpaceItem>
+                            <SpaceItem>
+                                <Button Size="@ButtonSize.Large" OnClick="@(() => Navigation.NavigateTo($"/blog/detail/{TaskId}"))">
+                                    <Icon Type="eye" /> 预览详情
+                                </Button>
+                            </SpaceItem>
+                        </Space>
+                    </Extra>
+                </Result>
+
+                <Divider />
+
+                @if (editingReview)
+                {
+                    <Card Title="编辑审查结果" Style="margin-top:20px;">
+                        <div style="width:100%;">
+                            <div style="margin-bottom: 24px;">
+                                <div style="margin-bottom: 8px;"><strong>综合评分 (0-100):</strong></div>
+                                <Slider @bind-Value="@reviewScoreEdit" Min="0" Max="100" Style="width:100%;" />
+                                <div style="margin-top: 8px; font-size: 16px; color: #1890ff;">
+                                    <strong>当前分数: @reviewScoreEdit</strong>
+                                </div>
+                            </div>
+                            <div style="margin-bottom: 24px;">
+                                <div style="margin-bottom: 8px;"><strong>审查建议:</strong></div>
+                                <Input @bind-Value="@reviewRecommendationEdit" 
+                                       Placeholder="通过 / 需修改 / 不通过" 
+                                       Size="@InputSize.Large"
+                                       Style="width:100%;" />
+                            </div>
+                            <div style="margin-bottom: 24px;">
+                                <div style="margin-bottom: 8px;"><strong>总结:</strong></div>
+                                <TextArea @bind-Value="@reviewSummaryEdit" 
+                                          Rows="10" 
+                                          Placeholder="编辑审查总结..." 
+                                          Style="font-size: 14px; line-height: 1.8; width:100%;" />
+                            </div>
+                        </div>
+                    </Card>
+                }
+                else
+                {
+                    <Descriptions Title="质量评估报告" Bordered Column="2" Style="margin-top:20px;">
+                        <DescriptionsItem Title="综合评分" Span="2">
+                            <Progress Percent="@reviewResult.OverallScore"
+                                      Status="@(reviewResult.OverallScore >= 80 ? ProgressStatus.Success : reviewResult.OverallScore >= 60 ? ProgressStatus.Normal : ProgressStatus.Exception)"
+                                      StrokeWidth="20" />
+                        </DescriptionsItem>
+                        <DescriptionsItem Title="准确性">
+                            <Tag Color="@(reviewResult.Accuracy.Score >= 32 ? "success" : "warning")">@reviewResult.Accuracy.Score / 40</Tag>
+                            @if (reviewResult.Accuracy.Issues.Any())
+                            {
+                                <ul style="margin-top:10px; color:#ff4d4f;">
+                                    @foreach (var issue in reviewResult.Accuracy.Issues)
+                                    {
+                                        <li>@issue</li>
+                                    }
+                                </ul>
+                            }
+                        </DescriptionsItem>
+                        <DescriptionsItem Title="逻辑性">
+                            <Tag Color="@(reviewResult.Logic.Score >= 24 ? "success" : "warning")">@reviewResult.Logic.Score / 30</Tag>
+                            @if (reviewResult.Logic.Issues.Any())
+                            {
+                                <ul style="margin-top:10px; color:#ff4d4f;">
+                                    @foreach (var issue in reviewResult.Logic.Issues)
+                                    {
+                                        <li>@issue</li>
+                                    }
+                                </ul>
+                            }
+                        </DescriptionsItem>
+                        <DescriptionsItem Title="原创性">
+                            <Tag Color="@(reviewResult.Originality.Score >= 16 ? "success" : "warning")">@reviewResult.Originality.Score / 20</Tag>
+                            @if (reviewResult.Originality.Issues.Any())
+                            {
+                                <ul style="margin-top:10px; color:#ff4d4f;">
+                                    @foreach (var issue in reviewResult.Originality.Issues)
+                                    {
+                                        <li>@issue</li>
+                                    }
+                                </ul>
+                            }
+                        </DescriptionsItem>
+                        <DescriptionsItem Title="规范性">
+                            <Tag Color="@(reviewResult.Formatting.Score >= 8 ? "success" : "warning")">@reviewResult.Formatting.Score / 10</Tag>
+                            @if (reviewResult.Formatting.Issues.Any())
+                            {
+                                <ul style="margin-top:10px; color:#ff4d4f;">
+                                    @foreach (var issue in reviewResult.Formatting.Issues)
+                                    {
+                                        <li>@issue</li>
+                                    }
+                                </ul>
+                            }
+                        </DescriptionsItem>
+                        <DescriptionsItem Title="审查建议" Span="2">
+                            <Tag Color="@(reviewResult.Recommendation == "通过" ? "success" : reviewResult.Recommendation == "需修改" ? "warning" : "error")" Style="font-size:16px; padding:5px 15px;">
+                                @reviewResult.Recommendation
+                            </Tag>
+                        </DescriptionsItem>
+                        @if (!string.IsNullOrEmpty(reviewResult.Summary))
+                        {
+                            <DescriptionsItem Title="总结" Span="2">
+                                @reviewResult.Summary
+                            </DescriptionsItem>
+                        }
+                    </Descriptions>
+                }
+            }
+        </div>
+    }
+    else if (currentStage == "completed")
+    {
+        <Result Status="ResultStatus.Success"
+                Title="🎉 博客发布成功!"
+                SubTitle="您的博客已经保存到数据库,可以查看详情或继续创建新博客">
+            <Extra>
+                <Space>
+                    <SpaceItem>
+                        <Button Type="@ButtonType.Primary" OnClick="@(() => Navigation.NavigateTo($"/blog/detail/{TaskId}"))">
+                            <Icon Type="eye" /> 查看博客详情
+                        </Button>
+                    </SpaceItem>
+                    <SpaceItem>
+                        <Button OnClick="@(() => Navigation.NavigateTo("/blog/list"))">
+                            <Icon Type="unordered-list" /> 博客列表
+                        </Button>
+                    </SpaceItem>
+                    <SpaceItem>
+                        <Button OnClick="@(() => Navigation.NavigateTo("/blog/create"))">
+                            <Icon Type="plus" /> 创建新博客
+                        </Button>
+                    </SpaceItem>
+                </Space>
+            </Extra>
+        </Result>
+    }
+</Card>
+
+@code {
+    [Parameter] public int TaskId { get; set; }
+
+    // 使用新的 Agent Framework Workflow
+    private bool useAgentFrameworkWorkflow = true;
+
+    private int currentStep = 0;
+    private StepsStatus stepStatus = StepsStatus.Process;
+    private string currentStage = "research";
+    private string currentStageTitle = "资料收集";
+    private bool stageExecuting = false;
+    private bool publishing = false;
+
+    private ResearchResultDto? researchResult;
+    private DraftContentDto? draftContent;
+    private ReviewResultDto? reviewResult;
+
+    // 编辑状态
+    private bool editingResearch = false;
+    private bool editingDraft = false;
+    private bool editingReview = false;
+
+    // 编辑内容
+    private string researchSummaryEdit = "";
+    private string draftTitleEdit = "";
+    private string draftContentEdit = "";
+    private double reviewScoreEdit = 0;
+    private string reviewRecommendationEdit = "";
+    private string reviewSummaryEdit = "";
+
+    // 用于跟踪组件是否已被销毁
+    private bool _disposed = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadWorkflowState();
+    }
+
+    private async Task LoadWorkflowState()
+    {
+        try
+        {
+            // 根据配置选择使用哪个服务
+            var state = useAgentFrameworkWorkflow 
+                ? await AgentWorkflowService.GetWorkflowStateAsync(TaskId)
+                : await WorkflowService.GetWorkflowStateAsync(TaskId);
+
+            // 检查组件是否已被销毁
+            if (_disposed) return;
+
+            // 根据状态决定当前阶段
+            if (state.IsPublished)
+            {
+                currentStage = "completed";
+                currentStep = 3;
+                currentStageTitle = "发布完成";
+            }
+            else if (state.HasReviewResult)
+            {
+                currentStage = "review";
+                currentStep = 2;
+                currentStageTitle = "质量审查";
+                reviewResult = await BlogService.GetReviewResultAsync(TaskId);
+            }
+            else if (state.HasDraftContent)
+            {
+                currentStage = "write";
+                currentStep = 1;
+                currentStageTitle = "博客撰写";
+                var content = await BlogService.GetContentAsync(TaskId);
+                if (content != null)
+                {
+                    draftContent = new DraftContentDto
+                    {
+                        Title = content.Title,
+                        Content = content.Content,
+                        WordCount = content.WordCount,
+                        GeneratedAt = content.CreatedAt
+                    };
+                }
+            }
+            else if (state.HasResearchResult)
+            {
+                currentStage = "research";
+                currentStep = 0;
+                currentStageTitle = "资料收集";
+                var content = await BlogService.GetContentAsync(TaskId);
+                if (content != null && !string.IsNullOrEmpty(content.ResearchSummary))
+                {
+                    researchResult = new ResearchResultDto
+                    {
+                        Summary = content.ResearchSummary,
+                        KeyPoints = new List<string>(),
+                        Timestamp = content.CreatedAt
+                    };
+                }
+            }
+
+            await SafeStateHasChangedAsync();
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Error($"加载工作流状态失败: {ex.Message}"));
+            }
+        }
+    }
+
+    private async Task ExecuteResearchStage()
+    {
+        stageExecuting = true;
+        await SafeStateHasChangedAsync();
+        
+        try
+        {
+            // 根据配置选择使用哪个服务
+            var result = useAgentFrameworkWorkflow
+                ? await AgentWorkflowService.ExecuteStageAsync(TaskId, "research")
+                : await WorkflowService.ExecuteStageAsync(TaskId, "research");
+
+            // 检查组件是否已被销毁
+            if (_disposed) return;
+
+            if (result.Success && result.Output is ResearchResultDto research)
+            {
+                researchResult = research;
+                await InvokeAsync(() => Message.Success("资料收集完成!"));
+            }
+            else
+            {
+                await InvokeAsync(() => Message.Error($"资料收集失败: {result.Message}"));
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Error($"执行失败: {ex.Message}"));
+            }
+        }
+        finally
+        {
+            if (!_disposed)
+            {
+                stageExecuting = false;
+                await SafeStateHasChangedAsync();
+            }
+        }
+    }
+
+    private async Task ProceedToWriteStage()
+    {
+        currentStage = "write";
+        currentStep = 1;
+        currentStageTitle = "博客撰写";
+        await SafeStateHasChangedAsync();
+    }
+
+    private async Task ExecuteWriteStage()
+    {
+        stageExecuting = true;
+        await SafeStateHasChangedAsync();
+        
+        try
+        {
+            // 根据配置选择使用哪个服务
+            var result = useAgentFrameworkWorkflow
+                ? await AgentWorkflowService.ExecuteStageAsync(TaskId, "write")
+                : await WorkflowService.ExecuteStageAsync(TaskId, "write");
+
+            // 检查组件是否已被销毁
+            if (_disposed) return;
+
+            if (result.Success && result.Output is DraftContentDto draft)
+            {
+                draftContent = draft;
+                await InvokeAsync(() => Message.Success("博客撰写完成!"));
+            }
+            else
+            {
+                await InvokeAsync(() => Message.Error($"博客撰写失败: {result.Message}"));
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Error($"执行失败: {ex.Message}"));
+            }
+        }
+        finally
+        {
+            if (!_disposed)
+            {
+                stageExecuting = false;
+                await SafeStateHasChangedAsync();
+            }
+        }
+    }
+
+    private async Task ProceedToReviewStage()
+    {
+        currentStage = "review";
+        currentStep = 2;
+        currentStageTitle = "质量审查";
+        await SafeStateHasChangedAsync();
+    }
+
+    private async Task ExecuteReviewStage()
+    {
+        stageExecuting = true;
+        await SafeStateHasChangedAsync();
+        
+        try
+        {
+            // 根据配置选择使用哪个服务
+            var result = useAgentFrameworkWorkflow
+                ? await AgentWorkflowService.ExecuteStageAsync(TaskId, "review")
+                : await WorkflowService.ExecuteStageAsync(TaskId, "review");
+
+            // 检查组件是否已被销毁
+            if (_disposed) return;
+
+            if (result.Success && result.Output is ReviewResultDto review)
+            {
+                reviewResult = review;
+                await InvokeAsync(() => Message.Success("质量审查完成!"));
+            }
+            else
+            {
+                await InvokeAsync(() => Message.Error($"质量审查失败: {result.Message}"));
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Error($"执行失败: {ex.Message}"));
+            }
+        }
+        finally
+        {
+            if (!_disposed)
+            {
+                stageExecuting = false;
+                await SafeStateHasChangedAsync();
+            }
+        }
+    }
+
+    private async Task BackToWriteStage()
+    {
+        currentStage = "write";
+        currentStep = 1;
+        currentStageTitle = "博客撰写";
+        await SafeStateHasChangedAsync();
+    }
+
+    private async Task PublishBlog()
+    {
+        publishing = true;
+        await SafeStateHasChangedAsync();
+        
+        try
+        {
+            var success = await BlogService.PublishBlogAsync(TaskId);
+
+            // 检查组件是否已被销毁
+            if (_disposed) return;
+
+            if (success)
+            {
+                await InvokeAsync(() => Message.Success("博客发布成功!"));
+                currentStage = "completed";
+                currentStep = 3;
+                currentStageTitle = "发布完成";
+                stepStatus = StepsStatus.Finish;
+                await SafeStateHasChangedAsync();
+            }
+            else
+            {
+                await InvokeAsync(() => Message.Error("博客发布失败"));
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Error($"发布失败: {ex.Message}"));
+            }
+        }
+        finally
+        {
+            if (!_disposed)
+            {
+                publishing = false;
+                await SafeStateHasChangedAsync();
+            }
+        }
+    }
+
+    /// <summary>
+    /// 安全地调用 StateHasChanged,检查组件是否已被销毁
+    /// </summary>
+    private async Task SafeStateHasChangedAsync()
+    {
+        if (!_disposed)
+        {
+            try
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (ObjectDisposedException)
+            {
+                // 组件已被销毁,忽略此异常
+            }
+        }
+    }
+
+    private async Task ToggleEditResearch()
+    {
+        if (editingResearch)
+        {
+            // 保存修改
+            try
+            {
+                if (researchResult != null)
+                {
+                    researchResult.Summary = researchSummaryEdit;
+                    // 保存到数据库
+                    await BlogService.UpdateResearchSummaryAsync(TaskId, researchSummaryEdit);
+                    await InvokeAsync(() => Message.Success("资料摘要已保存!"));
+                }
+            }
+            catch (Exception ex)
+            {
+                await InvokeAsync(() => Message.Error($"保存失败: {ex.Message}"));
+            }
+        }
+        else
+        {
+            // 进入编辑模式
+            researchSummaryEdit = researchResult?.Summary ?? "";
+        }
+        
+        editingResearch = !editingResearch;
+        await SafeStateHasChangedAsync();
+    }
+
+    private async Task ToggleEditDraft()
+    {
+        if (editingDraft)
+        {
+            // 保存修改
+            try
+            {
+                if (draftContent != null)
+                {
+                    draftContent.Title = draftTitleEdit;
+                    draftContent.Content = draftContentEdit;
+                    draftContent.WordCount = draftContentEdit.Length;
+                    
+                    // 保存到数据库
+                    await BlogService.UpdateBlogContentAsync(TaskId, draftTitleEdit, draftContentEdit);
+                    await InvokeAsync(() => Message.Success("博客内容已保存!"));
+                }
+            }
+            catch (Exception ex)
+            {
+                await InvokeAsync(() => Message.Error($"保存失败: {ex.Message}"));
+            }
+        }
+        else
+        {
+            // 进入编辑模式
+            draftTitleEdit = draftContent?.Title ?? "";
+            draftContentEdit = draftContent?.Content ?? "";
+        }
+        
+        editingDraft = !editingDraft;
+        await SafeStateHasChangedAsync();
+    }
+
+    private async Task ToggleEditReview()
+    {
+        if (editingReview)
+        {
+            // 保存修改
+            try
+            {
+                if (reviewResult != null)
+                {
+                    reviewResult.OverallScore = (int)reviewScoreEdit;
+                    reviewResult.Recommendation = reviewRecommendationEdit;
+                    reviewResult.Summary = reviewSummaryEdit;
+                    
+                    // 保存到数据库
+                    await BlogService.UpdateReviewResultAsync(TaskId, (int)reviewScoreEdit, reviewRecommendationEdit, reviewSummaryEdit);
+                    await InvokeAsync(() => Message.Success("审查结果已保存!"));
+                }
+            }
+            catch (Exception ex)
+            {
+                await InvokeAsync(() => Message.Error($"保存失败: {ex.Message}"));
+            }
+        }
+        else
+        {
+            // 进入编辑模式
+            reviewScoreEdit = reviewResult?.OverallScore ?? 0;
+            reviewRecommendationEdit = reviewResult?.Recommendation ?? "";
+            reviewSummaryEdit = reviewResult?.Summary ?? "";
+        }
+        
+        editingReview = !editingReview;
+        await SafeStateHasChangedAsync();
+    }
+
+    /// <summary>
+    /// 实现 IDisposable 接口
+    /// </summary>
+    public void Dispose()
+    {
+        _disposed = true;
+    }
+}
+

@@ -1,0 +1,203 @@
+@page "/blog/list"
+@using BlogAgent.Domain.Domain.Dto
+@using AgentTaskStatus = BlogAgent.Domain.Domain.Enum.AgentTaskStatus
+@using BlogAgent.Domain.Services
+@inject BlogService BlogService
+@inject NavigationManager Navigation
+@inject IMessageService Message
+@inject ModalService ModalService
+@implements IDisposable
+
+<PageHeader Title="博客管理">
+    <PageHeaderExtra>
+        <Space>
+            <SpaceItem>
+                <Button Type="@ButtonType.Primary" OnClick="@(() => Navigation.NavigateTo("/blog/create"))">
+                    <Icon Type="plus" /> 创建新博客
+                </Button>
+            </SpaceItem>
+            <SpaceItem>
+                <Button OnClick="@LoadData" Loading="@loading">
+                    <Icon Type="reload" /> 刷新
+                </Button>
+            </SpaceItem>
+        </Space>
+    </PageHeaderExtra>
+</PageHeader>
+
+<Card>
+    <Table TItem="BlogTaskDto"
+           DataSource="@tasks"
+           Loading="@loading"
+           Bordered
+           Size="@TableSize.Middle">
+        <PropertyColumn Title="ID" Property="@(c => c.Id)" Width="80" />
+        <PropertyColumn Title="主题" Property="@(c => c.Topic)" Ellipsis />
+        <Column TData="string" Title="状态" Width="150">
+            @{
+                var (color, text) = GetStatusDisplay(context.Status);
+            }
+            <Tag Color="@color">@text</Tag>
+        </Column>
+        <Column TData="string" Title="当前阶段" Width="120">
+            @if (!string.IsNullOrEmpty(context.CurrentStage))
+            {
+                @GetStageText(context.CurrentStage)
+            }
+            else
+            {
+                <span style="color:#999;">-</span>
+            }
+        </Column>
+        <Column TData="string" Title="创建时间" Width="180">
+            @context.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
+        </Column>
+        <ActionColumn Title="操作" Width="280">
+            <Space>
+                <SpaceItem>
+                    <Button Type="@ButtonType.Link" Size="@ButtonSize.Small" OnClick="@(() => Navigation.NavigateTo($"/blog/detail/{context.Id}"))">
+                        <Icon Type="eye" /> 查看
+                    </Button>
+                </SpaceItem>
+                @if (context.Status != AgentTaskStatus.Published)
+                {
+                    <SpaceItem>
+                        <Button Type="@ButtonType.Link" Size="@ButtonSize.Small" OnClick="@(() => Navigation.NavigateTo($"/blog/workflow/{context.Id}"))">
+                            <Icon Type="play-circle" /> 继续执行
+                        </Button>
+                    </SpaceItem>
+                }
+                <SpaceItem>
+                    <Popconfirm Title="确定要删除这个任务吗?"
+                                OnConfirm="@(() => DeleteTask(context.Id))"
+                                OkText="确定"
+                                CancelText="取消">
+                        <Button Type="@ButtonType.Link" Danger Size="@ButtonSize.Small">
+                            <Icon Type="delete" /> 删除
+                        </Button>
+                    </Popconfirm>
+                </SpaceItem>
+            </Space>
+        </ActionColumn>
+    </Table>
+</Card>
+
+@code {
+    private List<BlogTaskDto> tasks = new();
+    private bool loading = false;
+    private bool _disposed = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        loading = true;
+        await SafeStateHasChangedAsync();
+        
+        try
+        {
+            tasks = await BlogService.GetTaskListAsync(50);
+            
+            if (_disposed) return;
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Error($"加载数据失败: {ex.Message}"));
+            }
+        }
+        finally
+        {
+            if (!_disposed)
+            {
+                loading = false;
+                await SafeStateHasChangedAsync();
+            }
+        }
+    }
+
+    private async Task DeleteTask(int taskId)
+    {
+        try
+        {
+            var success = await BlogService.DeleteTaskAsync(taskId);
+
+            if (_disposed) return;
+
+            if (success)
+            {
+                await InvokeAsync(() => Message.Success("删除成功"));
+                await LoadData();
+            }
+            else
+            {
+                await InvokeAsync(() => Message.Error("删除失败"));
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                await InvokeAsync(() => Message.Error($"删除失败: {ex.Message}"));
+            }
+        }
+    }
+
+    private async Task SafeStateHasChangedAsync()
+    {
+        if (!_disposed)
+        {
+            try
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (ObjectDisposedException)
+            {
+                // 组件已被销毁,忽略此异常
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+    }
+
+    private (string color, string text) GetStatusDisplay(AgentTaskStatus status)
+    {
+        return status switch
+        {
+            AgentTaskStatus.Created => ("default", "已创建"),
+            AgentTaskStatus.Researching => ("processing", "资料收集中"),
+            AgentTaskStatus.ResearchCompleted => ("cyan", "资料收集完成"),
+            AgentTaskStatus.Writing => ("processing", "撰写中"),
+            AgentTaskStatus.WritingCompleted => ("blue", "撰写完成"),
+            AgentTaskStatus.Reviewing => ("processing", "审查中"),
+            AgentTaskStatus.ReviewCompleted => ("orange", "审查完成"),
+            AgentTaskStatus.Published => ("success", "已发布"),
+            AgentTaskStatus.Failed => ("error", "失败"),
+            _ => ("default", "未知")
+        };
+    }
+
+    private string GetStageText(string stage)
+    {
+        return stage switch
+        {
+            "created" => "已创建",
+            "research" => "资料收集",
+            "research_completed" => "资料收集完成",
+            "write" => "博客撰写",
+            "write_completed" => "撰写完成",
+            "review" => "质量审查",
+            "review_completed" => "审查完成",
+            "published" => "已发布",
+            _ => stage
+        };
+    }
+}
+

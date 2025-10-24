@@ -1,0 +1,156 @@
+﻿@namespace BlogAgent.Pages
+@page "/"
+@using BlogAgent.Domain.Services
+@using BlogAgent.Domain.Repositories
+@using BlogAgent.Domain.Domain.Enum
+@inject BlogService BlogService
+@inject ReviewResultRepository ReviewResultRepository
+@inject NavigationManager NavigationManager
+@implements IDisposable
+
+<PageHeader Title="博客智能体系统">
+    <PageHeaderContent>
+        <Paragraph>基于Microsoft Agent Framework的多Agent协作博客生成系统</Paragraph>
+    </PageHeaderContent>
+</PageHeader>
+
+<Row Gutter="16" Style="margin-top:24px;margin-bottom:24px;">
+    <AntDesign.Col Span="6">
+        <Card>
+            <Statistic Title="总任务数" Value="@totalTasks" Prefix="📝" ValueStyle="color: #3f8600" />
+        </Card>
+    </AntDesign.Col>
+    <AntDesign.Col Span="6">
+        <Card>
+            <Statistic Title="已发布" Value="@publishedCount" Prefix="✅" ValueStyle="color: #52c41a" />
+        </Card>
+    </AntDesign.Col>
+    <AntDesign.Col Span="6">
+        <Card>
+            <Statistic Title="平均评分" Value="@averageScore" Suffix="/100" Prefix="⭐" ValueStyle="color: #7F7FFF" />
+        </Card>
+    </AntDesign.Col>
+    <AntDesign.Col Span="6">
+        <Card>
+            <Statistic Title="通过率" Value="@passRate" Suffix="%" Prefix="🎯" ValueStyle="color: #eb2f96" />
+        </Card>
+    </AntDesign.Col>
+</Row>
+
+<Row Gutter="16">
+    <AntDesign.Col Span="12">
+        <Card Title="系统功能" Size="@AntDesign.CardSize.Small">
+            <Timeline>
+                <TimelineItem Color="@AntDesign.TimelineDotColor.Green">
+                    <strong>资料收集Agent</strong>
+                    <p style="margin:0; color:#666;">智能提取和整理参考资料,生成结构化摘要</p>
+                </TimelineItem>
+                <TimelineItem Color="@AntDesign.TimelineDotColor.Blue">
+                    <strong>博客撰写Agent</strong>
+                    <p style="margin:0; color:#666;">基于资料生成高质量技术博客,支持自定义风格</p>
+                </TimelineItem>
+                <TimelineItem Color="@AntDesign.TimelineDotColor.Gray">
+                    <strong>质量审查Agent</strong>
+                    <p style="margin:0; color:#666;">多维度评估文章质量,提供详细改进建议</p>
+                </TimelineItem>
+                <TimelineItem Color="@AntDesign.TimelineDotColor.Red">
+                    <strong>工作流编排</strong>
+                    <p style="margin:0; color:#666;">半自动化流程,每阶段用户确认后继续</p>
+                </TimelineItem>
+            </Timeline>
+        </Card>
+    </AntDesign.Col>
+    <AntDesign.Col Span="12">
+        <Card Title="快速开始" Size="@AntDesign.CardSize.Small">
+            <Steps Direction="@AntDesign.StepsDirection.Vertical" Size="@AntDesign.StepsSize.Small" Current="0">
+                <Step Title="创建任务" Description="输入博客主题和参考资料" />
+                <Step Title="资料收集" Description="AI自动整理和分析资料" />
+                <Step Title="博客撰写" Description="生成结构化的技术博客" />
+                <Step Title="质量审查" Description="多维度评估并提供建议" />
+                <Step Title="发布" Description="保存到数据库或导出Markdown" />
+            </Steps>
+            <Divider />
+            <Space Style="width:100%; justify-content:center;">
+                <SpaceItem>
+                    <Button Type="@ButtonType.Primary" Size="@ButtonSize.Large" OnClick="() => NavigateToCreate()">
+                        <Icon Type="rocket" /> 立即开始
+                    </Button>
+                </SpaceItem>
+                <SpaceItem>
+                    <Button Size="@ButtonSize.Large" OnClick="() => NavigateToList()">
+                        <Icon Type="unordered-list" /> 查看列表
+                    </Button>
+                </SpaceItem>
+            </Space>
+        </Card>
+    </AntDesign.Col>
+</Row>
+
+@code {
+    private int totalTasks = 0;
+    private int publishedCount = 0;
+    private int averageScore = 0;
+    private double passRate = 0;
+    private bool _disposed = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var tasks = await BlogService.GetTaskListAsync(1000);
+            
+            if (_disposed) return;
+            
+            totalTasks = tasks.Count;
+            publishedCount = tasks.Count(t => t.Status == AgentTaskStatus.Published);
+
+            var scores = await ReviewResultRepository.GetAverageScoresAsync();
+            
+            if (_disposed) return;
+            
+            if (scores.ContainsKey("Overall"))
+            {
+                averageScore = (int)scores["Overall"];
+            }
+
+            passRate = await ReviewResultRepository.GetPassRateAsync();
+            passRate = Math.Round(passRate, 1);
+
+            await SafeStateHasChangedAsync();
+        }
+        catch
+        {
+            // 忽略错误,使用默认值
+        }
+    }
+
+    private void NavigateToCreate()
+    {
+        NavigationManager.NavigateTo("/blog/create");
+    }
+
+    private void NavigateToList()
+    {
+        NavigationManager.NavigateTo("/blog/list");
+    }
+
+    private async Task SafeStateHasChangedAsync()
+    {
+        if (!_disposed)
+        {
+            try
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (ObjectDisposedException)
+            {
+                // 组件已被销毁,忽略此异常
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+    }
+}
