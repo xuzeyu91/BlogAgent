@@ -483,8 +483,6 @@ protected override ChatResponseFormat? ResponseFormat =>
 - [ ] 多语言支持
 - [ ] 云端部署方案
 
-详细路线图请查看 [Agent Framework 功能分析文档](docs/BlogAgent项目Agent-Framework功能分析.md)。
-
 ---
 
 ## ❓ 常见问题
