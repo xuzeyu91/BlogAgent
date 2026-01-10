@@ -64,5 +64,20 @@ namespace BlogAgent.Domain.Domain.Dto
         /// 审查结果(步骤3完成后)
         /// </summary>
         public ReviewResultDto? ReviewResult { get; set; }
+
+        /// <summary>
+        /// 执行器日志（V2 工作流专用）
+        /// </summary>
+        public string? ExecutorLog { get; set; }
+
+        /// <summary>
+        /// 重写次数
+        /// </summary>
+        public int RewriteCount { get; set; }
+
+        /// <summary>
+        /// 工作流路径描述（V2 工作流专用）
+        /// </summary>
+        public string? WorkflowPath { get; set; }
     }
 }

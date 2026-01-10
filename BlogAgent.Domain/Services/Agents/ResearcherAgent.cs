@@ -78,12 +78,13 @@ namespace BlogAgent.Domain.Services.Agents
 
             var output = await ExecuteAsync(input, taskId);
 
-            // 解析结构化输出
-            var researchOutput = JsonSerializer.Deserialize<ResearchOutput>(output);
+            // 解析结构化输出 - 使用 ParseJsonResponse 提供更好的容错性
+            var researchOutput = ParseJsonResponse<ResearchOutput>(output);
 
             if (researchOutput == null)
             {
-                throw new InvalidOperationException("无法解析研究结果");
+                _logger.LogError($"[ResearcherAgent] 无法解析研究结果, 原始输出: {output?.Substring(0, Math.Min(200, output?.Length ?? 0))}...");
+                throw new InvalidOperationException("无法解析研究结果, AI 返回的内容不是有效的 JSON 格式");
             }
 
             // 转换为 Markdown 格式(保持向后兼容)
