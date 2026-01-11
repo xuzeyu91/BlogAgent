@@ -33,28 +33,41 @@
 - [x] 创建 BlogAgentWorkflowServiceV2（条件工作流服务）
 - [x] 更新 WorkflowProgressDto 支持执行器日志
 - [x] 修复所有编译错误
-- [ ] 集成到 UI（让用户可以选择使用 V2 工作流）
-- [ ] 测试条件工作流的实际运行
+- [x] 集成到 UI（让用户可以选择使用 V2 工作流）
+- [x] 测试条件工作流的实际运行
 
-### Phase 3: Memory 记忆机制
-- [ ] 实现 Agent 间共享状态（Shared State）
-- [ ] 添加对话历史记忆
-- [ ] 创建上下文传递机制
-
-### Phase 4: 条件工作流
-- [ ] 实现条件边（Edge Conditions）- 根据评分决定下一步
-- [ ] 添加循环重写机制（评分不达标自动重写）
-- [ ] 实现分支逻辑（不同类型主题走不同流程）
-
-### Phase 5: Middleware 安全防护
-- [ ] 实现 PII 过滤中间件
-- [ ] 实现 Guardrails（内容安全检查）
-- [ ] 添加敏感词过滤
+### Phase 3: Middleware 安全防护
+- [x] 实现 PII 过滤中间件
+- [x] 实现 Guardrails（内容安全检查）
+- [x] 实现日志记录中间件
+- [x] 实现性能监控中间件
+- [x] 创建中间件辅助类
+- [x] 修复所有编译错误
 
 ### Phase 6: Human-in-the-Loop
-- [ ] 实现关键步骤人工确认
-- [ ] 添加函数调用审批机制
-- [ ] 支持工作流中断和恢复
+- [x] 实现关键步骤人工确认
+- [x] 添加函数调用审批机制
+- [x] 支持工作流中断和恢复
+
+### Phase 4: Memory 记忆机制
+- [x] 实现 Agent 间共享状态（Shared State）
+- [x] 添加对话历史记忆
+- [x] 创建上下文传递机制
+
+### Phase 4: 条件工作流
+- [x] 实现条件边（Edge Conditions）- 根据评分决定下一步
+- [x] 添加循环重写机制（评分不达标自动重写）
+- [x] 实现分支逻辑（不同类型主题走不同流程）
+
+### Phase 5: Middleware 安全防护
+- [x] 实现 PII 过滤中间件
+- [x] 实现 Guardrails（内容安全检查）
+- [x] 添加敏感词过滤
+
+### Phase 6: Human-in-the-Loop
+- [x] 实现关键步骤人工确认
+- [x] 添加函数调用审批机制
+- [x] 支持工作流中断和恢复
 
 ## 关键问题
 
@@ -79,7 +92,36 @@
 （暂无）
 
 ## 状态
-**目前在 Phase 2** - 准备实施条件工作流和 Shared State，这是最高优先级的增强
+**项目完成** - 已实现条件工作流（V2）、Middleware 安全防护、Human-in-the-Loop 和 Shared State
+
+## 已完成功能
+
+### Phase 2: 条件工作流实现 ✅
+- 创建了 `BlogStateConstants` 定义共享状态常量
+- 创建了消息类型：`BlogTaskInput`, `ResearchResultOutput`, `DraftContentOutput`, `ReviewResultOutput`
+- 创建了 Executor 类：`ResearcherExecutor`, `WriterExecutor`, `ReviewerExecutor`, `RewriteExecutor`, `PublishExecutor`, `FailureExecutor`
+- 创建了 `BlogAgentWorkflowServiceV2` 条件工作流服务
+- 更新了 `WorkflowProgressDto` 支持执行器日志
+- 集成到 UI，用户可以在 V1 和 V2 工作流之间选择
+
+### Phase 4: Shared State 记忆机制 ✅
+- `ResearcherExecutor` 存储任务信息、研究结果、初始化重写次数
+- `WriterExecutor` 读取任务信息，存储草稿内容
+- `ReviewerExecutor` 存储审查结果
+- `RewriteExecutor` 读取/更新重写次数、读取研究内容和任务信息
+
+### Phase 3: Middleware 安全防护 ✅
+- 创建了 `PIIMiddleware` - 过滤个人隐私信息（手机号、邮箱、身份证等）
+- 创建了 `GuardrailMiddleware` - 内容安全检查（敏感词过滤）
+- 创建了 `LoggingMiddleware` - 日志记录和性能监控
+- 创建了 `AgentMiddlewareHelpers` - 提供便捷的中间件使用方式
+
+### Phase 6: Human-in-the-Loop ✅
+- 创建了 `HumanInLoopHelper` - 人工介入辅助类
+- 创建了 `HumanInLoopWorkflowExtensions` - 工作流人工介入扩展
+- 实现了函数调用审批机制
+- 实现了工作流中断和恢复支持
+- 集成到 UI，用户可以在 V1 和 V2 工作流之间选择
 
 ## 优先级调整
 

@@ -174,3 +174,82 @@ async Task<AgentRunResponse> ContentSafetyMiddleware(
     return response;
 }
 ```
+
+---
+
+## 实现记录
+
+### Human-in-the-Loop 实现要点
+
+1. **ApprovalRequiredAIFunction**
+   - 用于包装需要人工审批的函数工具
+   - 来自 `Microsoft.Extensions.AI` 命名空间
+   - 当前是评估 API (MEAI001)，需要 `#pragma warning disable MEAI001`
+
+2. **FunctionApprovalRequestContent**
+   - 包含函数调用信息（函数名、参数）
+   - 需要用户创建响应（批准/拒绝）
+   - 通过 `AgentRunResponse.UserInputRequests` 获取
+
+3. **实现模式**
+```csharp
+// 1. 创建需要审批的函数
+var approvalFunction = new ApprovalRequiredAIFunction(originalFunction);
+
+// 2. 执行 Agent
+var response = await agent.RunAsync(input, thread);
+
+// 3. 检查是否有待处理请求
+while (response.UserInputRequests.Any())
+{
+    var approvals = response.UserInputRequests.OfType<FunctionApprovalRequestContent>();
+    var responses = approvals.Select(a =>
+        new ChatMessage(ChatRole.User, [a.CreateResponse(approved)]));
+    response = await agent.RunAsync(responses, thread);
+}
+```
+
+### 已知限制
+
+1. **AnonymousDelegatingAIAgent** 是 internal 类，无法直接使用
+2. **FunctionApprovalRequestContent** 是评估 API
+3. **ChatOptions.Tools** 需要类型转换
+
+### 创建的文件
+
+**Middleware**:
+- `PIIMiddleware.cs` - PII 过滤（手机号、邮箱、身份证等）
+- `GuardrailMiddleware.cs` - 内容安全检查（敏感词过滤）
+- `LoggingMiddleware.cs` - 日志和性能监控
+- `AgentMiddlewareHelpers.cs` - 中间件辅助方法
+
+**Human-in-the-Loop**:
+- `HumanInLoopHelper.cs` - 人工介入辅助类
+- `HumanInLoopWorkflowExtensions.cs` - 工作流扩展（含 WorkflowHumanInterventionManager）
+
+### Shared State 实现记录
+
+**已实现的功能**:
+- `ResearcherExecutor` 存储任务信息、研究结果、初始化重写次数
+- `WriterExecutor` 读取任务信息，存储草稿内容
+- `ReviewerExecutor` 存储审查结果
+- `RewriteExecutor` 读取/更新重写次数、读取研究内容和任务信息
+
+**Shared State 常量** (`BlogStateConstants.cs`):
+- `BlogStateScope` - 博客状态作用域
+- `TaskInfoKey` - 任务信息
+- `ResearchResultKey` - 研究结果
+- `DraftContentKey` - 草稿内容
+- `ReviewResultKey` - 审查结果
+- `RewriteCountKey` - 重写次数
+- `MaxRewriteCount` - 最大重写次数 (3)
+
+**API 使用**:
+```csharp
+// 写入
+await context.QueueStateUpdateAsync(key, value, scopeName, cancellationToken);
+
+// 读取
+var value = await context.ReadStateAsync<T>(key, scopeName, cancellationToken);
+```
+

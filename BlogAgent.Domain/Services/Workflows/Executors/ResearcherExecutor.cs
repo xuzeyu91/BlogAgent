@@ -42,6 +42,13 @@ namespace BlogAgent.Domain.Services.Workflows.Executors
 
             try
             {
+                // 存储任务信息到 Shared State（供后续 Executor 使用）
+                await context.QueueStateUpdateAsync(
+                    BlogStateConstants.TaskInfoKey,
+                    input,
+                    BlogStateConstants.BlogStateScope,
+                    cancellationToken);
+
                 // 调用 ResearcherAgent 进行资料收集
                 var result = await _agent.ResearchAsync(
                     input.Topic,
@@ -65,10 +72,17 @@ namespace BlogAgent.Domain.Services.Workflows.Executors
                     Domain.Enum.AgentTaskStatus.ResearchCompleted,
                     "research_executor_completed");
 
-                // 存储到 Shared State
+                // 存储研究结果到 Shared State
                 await context.QueueStateUpdateAsync(
                     BlogStateConstants.ResearchResultKey,
                     output,
+                    BlogStateConstants.BlogStateScope,
+                    cancellationToken);
+
+                // 初始化重写次数
+                await context.QueueStateUpdateAsync(
+                    BlogStateConstants.RewriteCountKey,
+                    0,
                     BlogStateConstants.BlogStateScope,
                     cancellationToken);
 

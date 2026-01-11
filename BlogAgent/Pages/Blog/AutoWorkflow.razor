@@ -3,6 +3,7 @@
 @using BlogAgent.Domain.Services
 @using BlogAgent.Domain.Services.Workflows
 @inject BlogAgentWorkflowService AgentWorkflowService
+@inject BlogAgentWorkflowServiceV2 AgentWorkflowServiceV2
 @inject BlogService BlogService
 @inject NavigationManager Navigation
 @inject IMessageService Message
@@ -25,12 +26,36 @@
     </PageHeaderExtra>
 </PageHeader>
 
+<!-- 工作流版本选择器 -->
+<div style="margin-bottom: 24px;">
+    <Card Title="工作流模式" Size="CardSize.Small">
+        <Body>
+            <RadioGroup @bind-Value="@workflowVersion" Disabled="@workflowStarted">
+                <Radio Style="@GetRadioStyle(true)" Value="@("V1")">
+                    <strong>V1 顺序工作流</strong>
+                    <br />
+                    <span style="color: #666; font-size: 12px;">固定流程：研究 → 撰写 → 审查，一次性完成</span>
+                </Radio>
+                <Radio Style="@GetRadioStyle(false)" Value="@("V2")">
+                    <strong>V2 条件工作流 (推荐)</strong>
+                    <br />
+                    <span style="color: #666; font-size: 12px;">智能流程：评分不足自动重写，质量更高</span>
+                </Radio>
+            </RadioGroup>
+        </Body>
+    </Card>
+</div>
+
 <div style="padding:24px; border-radius: 12px; margin-bottom: 24px; box-shadow: 0 4px 20px rgba(102, 126, 234, 0.25);">
-    <Steps Current="@currentStep" Status="@stepStatus" Type="StepsType.Navigation" Size="StepsSize.Default" 
+    <Steps Current="@currentStep" Status="@stepStatus" Type="StepsType.Navigation" Size="StepsSize.Default"
            Style="background: white; padding: 24px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
         <Step Title="资料收集" Description="ResearcherAgent 自动执行" Icon="file-search" />
         <Step Title="博客撰写" Description="WriterAgent 自动执行" Icon="edit" />
         <Step Title="质量审查" Description="ReviewerAgent 自动执行" Icon="audit" />
+        @if (workflowVersion == "V2")
+        {
+            <Step Title="智能重写" Description="自动重写优化内容" Icon="sync" />
+        }
         <Step Title="完成" Description="工作流执行完毕" Icon="check-circle" />
     </Steps>
 </div>
@@ -119,10 +144,38 @@
                             <Tag Color="@("blue")" Style="margin-left: 10px;">进行中</Tag>
                         }
                     </TimelineItem>
-                    <TimelineItem Color="@(currentStep >= 3 ? "green" : "gray")">
-                        <Icon Type="check-circle" /> 完成 @(currentStep >= 3 ? "✓" : "")
-                    </TimelineItem>
+                    @if (workflowVersion == "V2")
+                    {
+                        <TimelineItem Color="@(currentStep >= 3 ? "green" : currentStep == 2 ? "blue" : "gray")">
+                            <Icon Type="sync" /> 智能重写阶段 @(currentStep > 3 ? "✓" : currentStep == 3 ? "●" : "")
+                            @if (currentStep == 3)
+                            {
+                                <Tag Color="@("blue")" Style="margin-left: 10px;">进行中</Tag>
+                            }
+                            @if (rewriteCount > 0)
+                            {
+                                <Tag Color="@("orange")" Style="margin-left: 10px;">重写次数: @rewriteCount</Tag>
+                            }
+                        </TimelineItem>
+                        <TimelineItem Color="@(currentStep >= 4 ? "green" : "gray")">
+                            <Icon Type="check-circle" /> 完成 @(currentStep >= 4 ? "✓" : "")
+                        </TimelineItem>
+                    }
+                    else
+                    {
+                        <TimelineItem Color="@(currentStep >= 3 ? "green" : "gray")">
+                            <Icon Type="check-circle" /> 完成 @(currentStep >= 3 ? "✓" : "")
+                        </TimelineItem>
+                    }
                 </Timeline>
+
+                @if (workflowVersion == "V2" && !string.IsNullOrEmpty(executorLog))
+                {
+                    <Divider TextOrientation="DividerTextOrientation.Center" Plain>工作流执行日志</Divider>
+                    <div style="background: #1e1e1e; padding: 16px; border-radius: 8px; color: #d4d4d4; font-family: 'Consolas', 'Monaco', monospace; font-size: 12px; line-height: 1.6; max-height: 200px; overflow-y: auto; white-space: pre-wrap;">
+                        @executorLog
+                    </div>
+                }
             </Card>
         </div>
     }
@@ -205,24 +258,40 @@
 @code {
     [Parameter] public int TaskId { get; set; }
 
+    private string workflowVersion = "V2"; // 默认使用 V2 条件工作流
     private int currentStep = 0;
     private StepsStatus stepStatus = StepsStatus.Process;
     private string currentStageTitle = "智能博客生成工作流";
-    
+
     private bool workflowStarted = false;
     private bool workflowExecuting = false;
     private bool workflowCompleted = false;
     private bool workflowSuccess = false;
-    
+
     private string executionMessage = "";
     private string resultMessage = "";
     private string currentAgentOutput = "";
-    
+
     private ReviewResultDto? reviewResult;
+    private int rewriteCount = 0;
+    private string? executorLog = "";
     private bool _disposed = false;
-    
+
     private System.Threading.Timer? _progressTimer;
     private int _pollingCount = 0;
+
+    private string GetRadioStyle(bool isFirst)
+    {
+        return isFirst
+            ? "display: block; margin-bottom: 12px; padding: 12px; border: 1px solid #d9d9d9; border-radius: 4px; cursor: pointer;"
+            : "display: block; padding: 12px; border: 1px solid #1890ff; border-radius: 4px; cursor: pointer; background-color: #e6f7ff;";
+    }
+
+    private void OnWorkflowVersionChanged(string value)
+    {
+        workflowVersion = value;
+        StateHasChanged();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -257,6 +326,7 @@
         workflowExecuting = true;
         workflowCompleted = false;
         currentStep = 0;
+        rewriteCount = 0;
         executionMessage = "正在启动工作流...";
         _pollingCount = 0;
         await SafeStateHasChangedAsync();
@@ -265,19 +335,21 @@
         {
             // 启动进度轮询 (每 1 秒查询一次，更实时)
             _progressTimer = new System.Threading.Timer(async _ => await PollProgress(), null, 500, 1000);
-            
-            // 在后台执行工作流
+
+            // 在后台执行工作流 - 根据版本选择服务
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    var result = await AgentWorkflowService.ExecuteFullWorkflowAsync(TaskId);
-                    
+                    var result = workflowVersion == "V2"
+                        ? await AgentWorkflowServiceV2.ExecuteFullWorkflowAsync(TaskId)
+                        : await AgentWorkflowService.ExecuteFullWorkflowAsync(TaskId);
+
                     if (!_disposed)
                     {
                         // 等待最后一次轮询完成
                         await Task.Delay(500);
-                        
+
                         // 停止轮询
                         _progressTimer?.Dispose();
                         _progressTimer = null;
@@ -289,13 +361,13 @@
                     {
                         _progressTimer?.Dispose();
                         _progressTimer = null;
-                        
+
                         workflowSuccess = false;
                         stepStatus = StepsStatus.Error;
                         resultMessage = $"执行异常: {ex.Message}";
                         workflowExecuting = false;
                         workflowCompleted = true;
-                        
+
                         await InvokeAsync(() =>
                         {
                             Message.Error($"执行失败: {ex.Message}");
@@ -328,25 +400,29 @@
         try
         {
             _pollingCount++;
-            
-            // 获取最新进度
-            var progress = AgentWorkflowService.GetWorkflowProgress(TaskId);
-            
+
+            // 根据工作流版本获取进度
+            var progress = workflowVersion == "V2"
+                ? AgentWorkflowServiceV2.GetWorkflowProgress(TaskId)
+                : AgentWorkflowService.GetWorkflowProgress(TaskId);
+
             // 调试信息
             Console.WriteLine($"[PollProgress] 轮询次数: {_pollingCount}, 进度对象: {(progress != null ? "存在" : "null")}");
-            
+
             if (progress != null)
             {
                 Console.WriteLine($"[PollProgress] CurrentStep: {progress.CurrentStep}, Message: {progress.Message}, Output: {progress.CurrentOutput?.Substring(0, Math.Min(50, progress.CurrentOutput?.Length ?? 0))}");
-                
+
                 await InvokeAsync(() =>
                 {
                     currentStep = progress.CurrentStep;
                     executionMessage = progress.Message;
                     currentAgentOutput = progress.CurrentOutput ?? "";
-                    
+                    rewriteCount = progress.RewriteCount;
+                    executorLog = progress.ExecutorLog ?? "";
+
                     Console.WriteLine($"[UI更新] currentStep: {currentStep}, executionMessage: {executionMessage}");
-                    
+
                     // 更新步骤状态
                     if (progress.Status == "failed")
                     {
@@ -360,38 +436,40 @@
                     {
                         stepStatus = StepsStatus.Process;
                     }
-                    
+
                     // 检查是否完成
                     if (progress.IsCompleted)
                     {
                         workflowExecuting = false;
                         workflowCompleted = true;
                         workflowSuccess = progress.IsSuccess;
-                        
+
                         if (progress.IsSuccess)
                         {
-                            resultMessage = "所有阶段已完成,博客生成成功!";
+                            resultMessage = workflowVersion == "V2"
+                                ? $"条件工作流完成! (重写次数: {progress.RewriteCount})"
+                                : "所有阶段已完成,博客生成成功!";
                             reviewResult = progress.ReviewResult;
-                             Message.Success("🎉 博客生成工作流执行成功!");
+                            Message.Success($"🎉 博客生成工作流执行成功!{(workflowVersion == "V2" && progress.RewriteCount > 0 ? $" (自动重写 {progress.RewriteCount} 次)" : "")}");
                         }
                         else
                         {
                             resultMessage = $"工作流执行失败: {progress.ErrorMessage}";
-                             Message.Error($"工作流执行失败: {progress.ErrorMessage}");
+                            Message.Error($"工作流执行失败: {progress.ErrorMessage}");
                         }
-                        
+
                         // 停止轮询
                         _progressTimer?.Dispose();
                         _progressTimer = null;
                     }
-                    
+
                     StateHasChanged();
                 });
             }
             else
             {
                 Console.WriteLine($"[PollProgress] 进度对象为 null, 轮询次数: {_pollingCount}");
-                
+
                 if (_pollingCount > 300) // 5分钟超时 (300 * 1秒)
                 {
                     await InvokeAsync(() =>
@@ -401,11 +479,11 @@
                         workflowSuccess = false;
                         resultMessage = "工作流执行超时";
                         stepStatus = StepsStatus.Error;
-                        
+
                         _progressTimer?.Dispose();
                         _progressTimer = null;
-                        
-                         Message.Error("工作流执行超时");
+
+                        Message.Error("工作流执行超时");
                         StateHasChanged();
                     });
                 }
