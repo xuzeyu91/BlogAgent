@@ -171,7 +171,7 @@
 
                 @if (workflowVersion == "V2" && !string.IsNullOrEmpty(executorLog))
                 {
-                    <Divider TextOrientation="DividerTextOrientation.Center" Plain>工作流执行日志</Divider>
+                    <Divider Plain>工作流执行日志</Divider>
                     <div style="background: #1e1e1e; padding: 16px; border-radius: 8px; color: #d4d4d4; font-family: 'Consolas', 'Monaco', monospace; font-size: 12px; line-height: 1.6; max-height: 200px; overflow-y: auto; white-space: pre-wrap;">
                         @executorLog
                     </div>

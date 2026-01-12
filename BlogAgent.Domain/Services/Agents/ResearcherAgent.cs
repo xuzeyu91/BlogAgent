@@ -21,12 +21,20 @@ namespace BlogAgent.Domain.Services.Agents
 
         public override AgentType AgentType => AgentType.Researcher;
 
-        protected override string Instructions => @"你是一位专业的技术资料收集专家。
+        protected override string Instructions => @"你是一位专业的技术资料收集专家，具有联网搜索能力。
 
 **任务:**
 1. 仔细阅读用户提供的主题和参考资料
-2. 提取关键信息点(技术概念、代码示例、最佳实践、应用场景等)
-3. 整理成结构化的JSON格式输出
+2. 如果资料不足或需要最新信息，使用联网搜索工具查找相关内容
+3. 提取关键信息点(技术概念、代码示例、最佳实践、应用场景等)
+4. 整理成结构化的JSON格式输出
+
+**联网搜索指南:**
+- 当主题涉及最新技术、版本更新、或需要验证信息时，主动进行搜索
+- 搜索时使用精准的关键词组合
+- 优先搜索官方文档、权威技术博客、GitHub仓库等可靠来源
+- 对于技术概念，搜索其定义、原理和应用场景
+- 对于框架/库，搜索其最新版本、主要特性和使用示例
 
 **输出要求:**
 - topic_analysis: 对主题的理解和定位,包括技术背景、适用场景、目标读者
@@ -39,7 +47,8 @@ namespace BlogAgent.Domain.Services.Agents
 - 信息准确,不添加未提供的内容
 - 结构清晰,层次分明
 - 提炼核心概念,避免冗余
-- 如果资料不足,明确指出缺失的部分";
+- 如果资料不足,明确指出缺失的部分
+- 搜索到的信息请注明来源";
 
         // 使用结构化输出
         protected override ChatResponseFormat? ResponseFormat => 
@@ -106,7 +115,17 @@ namespace BlogAgent.Domain.Services.Agents
             var markdown = new System.Text.StringBuilder();
 
             markdown.AppendLine("## 主题分析");
-            markdown.AppendLine(output.TopicAnalysis);
+            if (output.TopicAnalysis != null)
+            {
+                if (!string.IsNullOrEmpty(output.TopicAnalysis.TechnicalBackground))
+                    markdown.AppendLine($"**技术背景:** {output.TopicAnalysis.TechnicalBackground}");
+                if (!string.IsNullOrEmpty(output.TopicAnalysis.UseCases))
+                    markdown.AppendLine($"**应用场景:** {output.TopicAnalysis.UseCases}");
+                if (!string.IsNullOrEmpty(output.TopicAnalysis.TargetAudience))
+                    markdown.AppendLine($"**目标读者:** {output.TopicAnalysis.TargetAudience}");
+                if (!string.IsNullOrEmpty(output.TopicAnalysis.Summary))
+                    markdown.AppendLine($"**概述:** {output.TopicAnalysis.Summary}");
+            }
             markdown.AppendLine();
 
             markdown.AppendLine("## 核心要点");

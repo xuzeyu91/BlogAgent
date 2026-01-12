@@ -8,7 +8,7 @@ namespace BlogAgent.Domain.Domain.Model
     public class ResearchOutput
     {
         [JsonPropertyName("topic_analysis")]
-        public string TopicAnalysis { get; set; } = string.Empty;
+        public TopicAnalysis TopicAnalysis { get; set; } = new();
 
         [JsonPropertyName("key_points")]
         public List<KeyPoint> KeyPoints { get; set; } = new();
@@ -21,6 +21,24 @@ namespace BlogAgent.Domain.Domain.Model
 
         [JsonPropertyName("references")]
         public List<string> References { get; set; } = new();
+    }
+
+    /// <summary>
+    /// 主题分析
+    /// </summary>
+    public class TopicAnalysis
+    {
+        [JsonPropertyName("technical_background")]
+        public string TechnicalBackground { get; set; } = string.Empty;
+
+        [JsonPropertyName("use_cases")]
+        public string UseCases { get; set; } = string.Empty;
+
+        [JsonPropertyName("target_audience")]
+        public string TargetAudience { get; set; } = string.Empty;
+
+        [JsonPropertyName("summary")]
+        public string Summary { get; set; } = string.Empty;
     }
 
     public class KeyPoint

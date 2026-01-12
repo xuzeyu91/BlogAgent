@@ -690,7 +690,17 @@ namespace BlogAgent.Domain.Services.Workflows
             var markdown = new System.Text.StringBuilder();
 
             markdown.AppendLine("## 主题分析");
-            markdown.AppendLine(output.TopicAnalysis);
+            if (output.TopicAnalysis != null)
+            {
+                if (!string.IsNullOrEmpty(output.TopicAnalysis.TechnicalBackground))
+                    markdown.AppendLine($"**技术背景:** {output.TopicAnalysis.TechnicalBackground}");
+                if (!string.IsNullOrEmpty(output.TopicAnalysis.UseCases))
+                    markdown.AppendLine($"**应用场景:** {output.TopicAnalysis.UseCases}");
+                if (!string.IsNullOrEmpty(output.TopicAnalysis.TargetAudience))
+                    markdown.AppendLine($"**目标读者:** {output.TopicAnalysis.TargetAudience}");
+                if (!string.IsNullOrEmpty(output.TopicAnalysis.Summary))
+                    markdown.AppendLine($"**概述:** {output.TopicAnalysis.Summary}");
+            }
             markdown.AppendLine();
 
             markdown.AppendLine("## 核心要点");
